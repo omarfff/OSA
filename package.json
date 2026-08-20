@@ -1,0 +1,19 @@
+{
+  "name": "osa-agent-trust-oracle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OSA Agent Trust Oracle: rank and verify agent/API endpoints before purchase.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@x402/core": "^2.10.0",
+    "@x402/evm": "^2.10.0",
+    "@x402/express": "^2.10.0",
+    "@x402/extensions": "^2.10.0",
+    "express": "^5.1.0"
+  }
+}
