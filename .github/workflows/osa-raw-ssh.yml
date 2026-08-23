@@ -15,9 +15,7 @@ permissions:
 
 jobs:
   raw-ssh:
-    if: >-
-      (github.event_name == 'push') ||
-      (github.event_name == 'issues' && github.event.issue.title == 'OSA Raw SSH')
+    if: github.event_name == 'push' || startsWith(github.event.issue.title, 'OSA-RAW-SSH:')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -25,21 +23,24 @@ jobs:
         shell: bash
         env:
           BROKER_URL: https://jpnlmpqqtiwisxcsjwbm.supabase.co/functions/v1/osa-github-ssh-broker
-          ISSUE_JOB_ID: ${{ github.event.issue.body }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" = "issues" ]; then
-            JOB_ID="$(printf '%s' "$ISSUE_JOB_ID" | tr -d '\r\n[:space:]')"
-          else
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             JOB_ID="$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/ops/raw-ssh-trigger.txt" | tr -d '\r\n[:space:]')"
+          else
+            TITLE="$(jq -r '.issue.title' "$GITHUB_EVENT_PATH")"
+            JOB_ID="${TITLE#OSA-RAW-SSH:}"
           fi
           if ! [[ "$JOB_ID" =~ ^[0-9a-fA-F-]{36}$ ]]; then echo "invalid job id" >&2; exit 2; fi
+
           ssh-keygen -q -t ed25519 -N '' -C "osa-gh-${GITHUB_RUN_ID}" -f /tmp/osa_key
           OIDC_TOKEN="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value')"
           test -n "$OIDC_TOKEN"
           CLAIM_PAYLOAD="$(jq -n --arg action claim --arg job_id "$JOB_ID" --arg public_key "$(cat /tmp/osa_key.pub)" '{action:$action,job_id:$job_id,public_key:$public_key}')"
           CLAIM="$(curl -fsSL -H "Authorization: Bearer ${OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$CLAIM_PAYLOAD" "$BROKER_URL")"
           test "$(jq -r '.ok' <<<"$CLAIM")" = "true"
+
           HOST="$(jq -r '.host' <<<"$CLAIM")"
           PORT="$(jq -r '.port' <<<"$CLAIM")"
           PRINCIPAL="$(jq -r '.principal' <<<"$CLAIM")"
@@ -50,21 +51,24 @@ jobs:
           chmod 600 /tmp/osa_key /tmp/osa_key-cert.pub
           printf '%s' "$CMD_B64" | base64 -d > /tmp/osa_command.sh
           chmod 600 /tmp/osa_command.sh
+
           ssh-keyscan -T 10 -p "$PORT" -t ed25519 "$HOST" > /tmp/known_hosts 2>/dev/null
           ACTUAL_FP="$(ssh-keygen -lf /tmp/known_hosts | awk 'NR==1{print $2}')"
           if [ "$ACTUAL_FP" != "$EXPECTED_FP" ]; then echo "host key fingerprint mismatch" >&2; exit 3; fi
+
           set +e
           ssh -p "$PORT" -i /tmp/osa_key -o CertificateFile=/tmp/osa_key-cert.pub -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/tmp/known_hosts -o ConnectTimeout=15 "${PRINCIPAL}@${HOST}" 'bash -s' < /tmp/osa_command.sh > /tmp/osa_stdout 2> /tmp/osa_stderr
           RC=$?
           set -e
+
           REPORT_PAYLOAD="$(jq -n --arg action report --arg job_id "$JOB_ID" --argjson exit_code "$RC" --rawfile stdout /tmp/osa_stdout --rawfile stderr /tmp/osa_stderr '{action:$action,job_id:$job_id,exit_code:$exit_code,stdout:$stdout,stderr:$stderr}')"
           curl -fsSL -H "Authorization: Bearer ${OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$REPORT_PAYLOAD" "$BROKER_URL" >/dev/null
+
+          if [ "$GITHUB_EVENT_NAME" = "issues" ]; then
+            ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+            gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed >/dev/null 2>&1 || true
+          fi
+
           cat /tmp/osa_stdout
           cat /tmp/osa_stderr >&2
           exit "$RC"
-
-      - name: Close trigger issue
-        if: always() && github.event_name == 'issues'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh issue close "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --reason completed >/dev/null || true
