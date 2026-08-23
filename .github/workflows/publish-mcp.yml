@@ -21,9 +21,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Install mcp-publisher
+      - name: Install pinned mcp-publisher
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.1
+          MCP_PUBLISHER_LINUX_AMD64_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
         run: |
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          set -euo pipefail
+          test "$(uname -s)" = "Linux"
+          test "$(uname -m)" = "x86_64"
+          url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          curl --fail --show-error --silent --location --proto '=https' --tlsv1.2 "$url" -o /tmp/mcp-publisher.tar.gz
+          echo "${MCP_PUBLISHER_LINUX_AMD64_SHA256}  /tmp/mcp-publisher.tar.gz" | sha256sum --check --strict
+          tar --extract --gzip --file /tmp/mcp-publisher.tar.gz mcp-publisher
+          ./mcp-publisher --help >/dev/null
 
       - name: Validate manifest
         run: ./mcp-publisher validate server.json
