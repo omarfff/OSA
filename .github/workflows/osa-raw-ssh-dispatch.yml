@@ -27,7 +27,18 @@ jobs:
           OIDC_TOKEN="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value')"
           test -n "$OIDC_TOKEN"
           CLAIM_PAYLOAD="$(jq -n --arg action claim --arg job_id "$JOB_ID" --arg public_key "$(cat /tmp/osa_key.pub)" '{action:$action,job_id:$job_id,public_key:$public_key}')"
-          CLAIM="$(curl -fsSL -H "Authorization: Bearer ${OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$CLAIM_PAYLOAD" "$BROKER_URL")"
+          CLAIM_FILE="$(mktemp)"
+          CLAIM_HTTP="$(curl -sS -o "$CLAIM_FILE" -w '%{http_code}' -H "Authorization: Bearer ${OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$CLAIM_PAYLOAD" "$BROKER_URL" || true)"
+          if [ "$CLAIM_HTTP" = "409" ]; then
+            echo "RAW SSH job ${JOB_ID} is already claimed or consumed; rerun is an idempotent no-op."
+            exit 0
+          fi
+          if ! [[ "$CLAIM_HTTP" =~ ^2[0-9][0-9]$ ]]; then
+            echo "RAW SSH broker claim failed with HTTP ${CLAIM_HTTP}" >&2
+            cat "$CLAIM_FILE" >&2 || true
+            exit 22
+          fi
+          CLAIM="$(cat "$CLAIM_FILE")"
           test "$(jq -r '.ok' <<<"$CLAIM")" = "true"
           HOST="$(jq -r '.host' <<<"$CLAIM")"
           PORT="$(jq -r '.port' <<<"$CLAIM")"
