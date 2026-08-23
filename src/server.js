@@ -54,9 +54,8 @@ app.post("/sources/bazaar", (req, res) => {
 app.get("/score", async (req, res) => {
   const id = req.query.id;
   const url = req.query.url;
-  let endpoint = listEndpoints().find((x) => (id && x.id === id) || (url && x.url === url));
-  if (!endpoint && url) endpoint = upsertEndpoint(normalizeEndpoint({ url, intent: req.query.intent, priceUsd: req.query.price }, "ad-hoc"));
-  if (!endpoint) return res.status(404).json({ error: "endpoint not found; provide id or url" });
+  const endpoint = listEndpoints().find((x) => (id && x.id === id) || (url && x.url === url));
+  if (!endpoint) return res.status(404).json({ error: "endpoint not found in trusted registry" });
   res.json(await scoreOne(endpoint));
 });
 
