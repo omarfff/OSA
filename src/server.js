@@ -97,4 +97,8 @@ app.get("/.well-known/osa.json", (_req, res) => res.json({
 }));
 
 const port = Number(process.env.PORT || 4021);
-app.listen(port, () => console.log(`OSA Agent Trust Oracle listening on :${port}`));
+if (!process.env.VERCEL) {
+  app.listen(port, () => console.log(`OSA Agent Trust Oracle listening on :${port}`));
+}
+
+export default app;
