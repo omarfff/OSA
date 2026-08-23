@@ -3,23 +3,17 @@
   "name": "io.github.omarfff/osa-procurement-guard",
   "title": "OSA Procurement Guard",
   "description": "Pre-purchase trust, pricing and budget decisions for AI agents buying APIs and MCP tools.",
-  "repository": {
-    "url": "https://github.com/omarfff/OSA",
-    "source": "github"
-  },
-  "version": "0.2.1",
-  "remotes": [
-    {
-      "type": "streamable-http",
-      "url": "https://pkctqxeydfuiupadaoov.supabase.co/functions/v1/procurement-mcp",
-      "headers": [
-        {
-          "name": "X-API-Key",
-          "description": "OSA API key for decision calls. Trial access is available from the OSA Procurement Guard site.",
-          "isRequired": true,
-          "isSecret": true
-        }
-      ]
-    }
-  ]
+  "repository": {"url": "https://github.com/omarfff/OSA", "source": "github"},
+  "websiteUrl": "https://pkctqxeydfuiupadaoov.supabase.co/functions/v1/procurement-site",
+  "version": "0.2.2",
+  "remotes": [{
+    "type": "streamable-http",
+    "url": "https://pkctqxeydfuiupadaoov.supabase.co/functions/v1/procurement-mcp",
+    "headers": [{
+      "name": "X-API-Key",
+      "description": "Required OSA API key. Get 20 free decision calls from websiteUrl.",
+      "isRequired": true,
+      "isSecret": true
+    }]
+  }]
 }
