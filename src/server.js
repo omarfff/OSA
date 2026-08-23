@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import express from "express";
 import { normalizeEndpoint, calculateTrustScore, liveVerify } from "./core.js";
-import { addSnapshot, historyFor, listEndpoints, listSnapshots, upsertEndpoint } from "./store.js";
+import { addSnapshot, historyFor, latestSnapshot, listEndpoints, storeMode, upsertEndpoint } from "./store.js";
 import { buildPaymentMiddleware } from "./x402.js";
 
 const app = express();
@@ -32,15 +32,15 @@ function requireIngestKey(req, res, next) {
   next();
 }
 
-function previousSnapshot(id) {
-  return listSnapshots().filter((x) => x.endpointId === id).at(-1) || null;
+async function previousSnapshot(id) {
+  return await latestSnapshot(id);
 }
 
 async function scoreOne(endpoint, requestTimeoutMs = timeoutMs) {
-  const previous = previousSnapshot(endpoint.id);
+  const previous = await previousSnapshot(endpoint.id);
   const current = await liveVerify(endpoint, requestTimeoutMs);
   const trust = calculateTrustScore(endpoint, current, previous);
-  addSnapshot({ endpointId: endpoint.id, ...current, ...trust });
+  await addSnapshot({ endpointId: endpoint.id, ...current, ...trust });
   return { endpoint, live: current, ...trust };
 }
 
@@ -61,30 +61,30 @@ async function scoreWithBudget(candidates) {
   return scored.filter(Boolean);
 }
 
-app.get("/health", (_req, res) => res.json({ ok: true, service: "OSA Agent Trust Oracle", version: "0.2.0", x402: Boolean(process.env.OSA_PAY_TO), secureFetch: true }));
+app.get("/health", (_req, res) => res.json({ ok: true, service: "OSA Agent Trust Oracle", version: "0.3.0", x402: Boolean(process.env.OSA_PAY_TO), secureFetch: true, storage: storeMode() }));
 
-app.post("/ingest", requireIngestKey, (req, res) => {
+app.post("/ingest", requireIngestKey, async (req, res) => {
   const items = Array.isArray(req.body) ? req.body : [req.body];
   try {
-    const saved = items.map((x) => upsertEndpoint(normalizeEndpoint(x, x.source || "manual")));
+    const saved = await Promise.all(items.map((x) => upsertEndpoint(normalizeEndpoint(x, x.source || "manual"))));
     res.status(201).json({ count: saved.length, endpoints: saved });
   } catch (error) {
     res.status(400).json({ error: String(error.message || error) });
   }
 });
 
-app.post("/sources/mcp", requireIngestKey, (req, res) => {
+app.post("/sources/mcp", requireIngestKey, async (req, res) => {
   const items = Array.isArray(req.body) ? req.body : req.body?.tools || req.body?.servers || [];
   try {
-    const saved = items.map((x) => upsertEndpoint(normalizeEndpoint(x, "mcp-registry")));
+    const saved = await Promise.all(items.map((x) => upsertEndpoint(normalizeEndpoint(x, "mcp-registry"))));
     res.status(201).json({ count: saved.length, endpoints: saved });
   } catch (error) { res.status(400).json({ error: String(error.message || error) }); }
 });
 
-app.post("/sources/bazaar", requireIngestKey, (req, res) => {
+app.post("/sources/bazaar", requireIngestKey, async (req, res) => {
   const items = Array.isArray(req.body) ? req.body : req.body?.resources || req.body?.items || [];
   try {
-    const saved = items.map((x) => upsertEndpoint(normalizeEndpoint(x, "x402-bazaar")));
+    const saved = await Promise.all(items.map((x) => upsertEndpoint(normalizeEndpoint(x, "x402-bazaar"))));
     res.status(201).json({ count: saved.length, endpoints: saved });
   } catch (error) { res.status(400).json({ error: String(error.message || error) }); }
 });
@@ -92,20 +92,20 @@ app.post("/sources/bazaar", requireIngestKey, (req, res) => {
 app.get("/score", async (req, res) => {
   const id = req.query.id;
   const url = req.query.url;
-  const endpoint = listEndpoints().find((x) => (id && x.id === id) || (url && x.url === url));
+  const endpoint = (await listEndpoints()).find((x) => (id && x.id === id) || (url && x.url === url));
   if (!endpoint) return res.status(404).json({ error: "endpoint not found in trusted registry" });
   res.json(await scoreOne(endpoint));
 });
 
-app.get("/history", (req, res) => {
+app.get("/history", async (req, res) => {
   if (!req.query.id) return res.status(400).json({ error: "id is required" });
-  res.json({ endpointId: req.query.id, snapshots: historyFor(req.query.id, Number(req.query.limit || 100)) });
+  res.json({ endpointId: req.query.id, snapshots: await historyFor(req.query.id, Number(req.query.limit || 100)) });
 });
 
 app.get("/best", async (req, res) => {
   const intent = String(req.query.intent || "").toLowerCase();
   const maxPrice = req.query.max_price === undefined ? Infinity : Number(req.query.max_price);
-  const candidates = listEndpoints().filter((x) => {
+  const candidates = (await listEndpoints()).filter((x) => {
     const intentOk = !intent || (x.intents || []).some((i) => String(i).toLowerCase().includes(intent)) || String(x.description || "").toLowerCase().includes(intent);
     const priceOk = x.priceUsd === null || x.priceUsd === undefined || x.priceUsd <= maxPrice;
     return intentOk && priceOk;
@@ -129,13 +129,18 @@ app.get("/best", async (req, res) => {
 
 app.get("/.well-known/osa.json", (_req, res) => res.json({
   name: "OSA Agent Trust Oracle",
-  version: "0.2.0",
+  version: "0.3.0",
   description: "Pre-purchase trust scoring and live verification for agent/API endpoints.",
   endpoints: ["GET /best", "GET /score", "GET /history", "POST /ingest", "POST /sources/mcp", "POST /sources/bazaar"],
   security: { ssrfProtection: true, ingestAuthentication: true, responseByteLimit: true, boundedConcurrency: true },
   x402: { enabled: Boolean(process.env.OSA_PAY_TO), network: process.env.OSA_NETWORK || "eip155:84532", currency: "USDC" },
   output: ["endpoint", "score", "confidence", "alternatives", "reasonCodes"]
 }));
+
+app.use((error, _req, res, _next) => {
+  console.error("OSA request failed", String(error?.message || error));
+  if (!res.headersSent) res.status(500).json({ error: "internal error" });
+});
 
 const port = Number(process.env.PORT || 4021);
 if (!process.env.VERCEL) {

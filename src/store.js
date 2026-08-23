@@ -6,6 +6,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(here, "../data");
 const endpointsPath = path.join(dataDir, "endpoints.json");
 const snapshotsPath = path.join(dataDir, "snapshots.json");
+const remoteUrl = process.env.OSA_STORE_URL || "";
+const remoteKey = process.env.OSA_STORE_KEY || "";
+const remoteTimeoutMs = Math.max(1000, Number(process.env.OSA_STORE_TIMEOUT_MS || 6000));
 
 function ensureFile(file, fallback = []) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -25,11 +28,38 @@ function writeJson(file, value) {
   fs.renameSync(tmp, file);
 }
 
-export function listEndpoints() { return readJson(endpointsPath); }
-export function listSnapshots() { return readJson(snapshotsPath); }
+function remoteEnabled() { return Boolean(remoteUrl && remoteKey); }
+export function storeMode() { return remoteEnabled() ? "supabase" : "local-json"; }
 
-export function upsertEndpoint(endpoint) {
-  const rows = listEndpoints();
+async function remoteCall(action, payload = {}) {
+  if (!remoteEnabled()) throw new Error("remote store is not configured");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), remoteTimeoutMs);
+  try {
+    const response = await fetch(remoteUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-osa-store-key": remoteKey },
+      body: JSON.stringify({ action, ...payload }),
+      signal: controller.signal
+    });
+    let body = {};
+    try { body = await response.json(); } catch { body = {}; }
+    if (!response.ok) throw new Error(`remote store ${action} failed with HTTP ${response.status}`);
+    if (body?.error) throw new Error(`remote store ${action} failed`);
+    return body;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function listEndpoints() {
+  if (remoteEnabled()) return (await remoteCall("list_endpoints")).endpoints || [];
+  return readJson(endpointsPath);
+}
+
+export async function upsertEndpoint(endpoint) {
+  if (remoteEnabled()) return (await remoteCall("upsert_endpoint", { endpoint })).endpoint;
+  const rows = readJson(endpointsPath);
   const i = rows.findIndex((x) => x.id === endpoint.id);
   if (i >= 0) rows[i] = { ...rows[i], ...endpoint, updatedAt: new Date().toISOString() };
   else rows.push({ ...endpoint, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
@@ -37,13 +67,21 @@ export function upsertEndpoint(endpoint) {
   return rows.find((x) => x.id === endpoint.id);
 }
 
-export function addSnapshot(snapshot) {
-  const rows = listSnapshots();
+export async function addSnapshot(snapshot) {
+  if (remoteEnabled()) return (await remoteCall("add_snapshot", { snapshot })).snapshot;
+  const rows = readJson(snapshotsPath);
   rows.push(snapshot);
   writeJson(snapshotsPath, rows.slice(-10000));
   return snapshot;
 }
 
-export function historyFor(endpointId, limit = 100) {
-  return listSnapshots().filter((x) => x.endpointId === endpointId).slice(-limit).reverse();
+export async function latestSnapshot(endpointId) {
+  if (remoteEnabled()) return (await remoteCall("latest_snapshot", { endpointId })).snapshot || null;
+  return readJson(snapshotsPath).filter((x) => x.endpointId === endpointId).at(-1) || null;
+}
+
+export async function historyFor(endpointId, limit = 100) {
+  const safeLimit = Math.max(1, Math.min(500, Number(limit || 100)));
+  if (remoteEnabled()) return (await remoteCall("history", { endpointId, limit: safeLimit })).snapshots || [];
+  return readJson(snapshotsPath).filter((x) => x.endpointId === endpointId).slice(-safeLimit).reverse();
 }
