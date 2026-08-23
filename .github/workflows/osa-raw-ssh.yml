@@ -5,13 +5,19 @@ on:
     branches: [main]
     paths:
       - 'ops/raw-ssh-trigger.txt'
+  issues:
+    types: [opened]
 
 permissions:
   contents: read
   id-token: write
+  issues: write
 
 jobs:
   raw-ssh:
+    if: >-
+      (github.event_name == 'push') ||
+      (github.event_name == 'issues' && github.event.issue.title == 'OSA Raw SSH')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -19,9 +25,14 @@ jobs:
         shell: bash
         env:
           BROKER_URL: https://jpnlmpqqtiwisxcsjwbm.supabase.co/functions/v1/osa-github-ssh-broker
+          ISSUE_JOB_ID: ${{ github.event.issue.body }}
         run: |
           set -euo pipefail
-          JOB_ID="$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/ops/raw-ssh-trigger.txt" | tr -d '\r\n[:space:]')"
+          if [ "${GITHUB_EVENT_NAME}" = "issues" ]; then
+            JOB_ID="$(printf '%s' "$ISSUE_JOB_ID" | tr -d '\r\n[:space:]')"
+          else
+            JOB_ID="$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/ops/raw-ssh-trigger.txt" | tr -d '\r\n[:space:]')"
+          fi
           if ! [[ "$JOB_ID" =~ ^[0-9a-fA-F-]{36}$ ]]; then echo "invalid job id" >&2; exit 2; fi
           ssh-keygen -q -t ed25519 -N '' -C "osa-gh-${GITHUB_RUN_ID}" -f /tmp/osa_key
           OIDC_TOKEN="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value')"
@@ -51,3 +62,9 @@ jobs:
           cat /tmp/osa_stdout
           cat /tmp/osa_stderr >&2
           exit "$RC"
+
+      - name: Close trigger issue
+        if: always() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue close "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --reason completed >/dev/null || true
