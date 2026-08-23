@@ -6,9 +6,12 @@
   "description": "OSA Agent Trust Oracle: rank and verify agent/API endpoints before purchase.",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "chaos": "node scripts/chaos.mjs"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@x402/core": "^2.10.0",
     "@x402/evm": "^2.10.0",
