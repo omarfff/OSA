@@ -1,0 +1,31 @@
+[Unit]
+Description=OSA Local AI Brain
+After=network-online.target ollama.service
+Wants=network-online.target
+Requires=ollama.service
+
+[Service]
+Type=simple
+User=osa-brain
+Group=osa-brain
+WorkingDirectory=/var/lib/osa-brain
+EnvironmentFile=-/etc/osa/brain.env
+ExecStart=/usr/bin/node /usr/local/lib/osa/osa-brain.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/osa-brain
+
+[Install]
+WantedBy=multi-user.target

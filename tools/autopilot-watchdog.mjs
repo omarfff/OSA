@@ -9,6 +9,7 @@ const STATUS_DIR = process.env.OSA_AUTOPILOT_STATE || '/var/lib/osa-autopilot';
 const MEDIA_ROOT = process.env.OSA_MEDIA_ROOT || '/var/lib/osa-media/outbox';
 const TELEGRAM_ENV = process.env.OSA_TELEGRAM_ENV || '/etc/osa/telegram-wallet-tracker.env';
 const MEDIA_MAX_AGE_MS = Number(process.env.OSA_MEDIA_MAX_AGE_MS || 8 * 60 * 60 * 1000);
+const BRAIN_URL = process.env.OSA_BRAIN_URL || 'http://127.0.0.1:8787';
 
 async function runSystemctl(args) {
   try {
@@ -52,6 +53,26 @@ async function diskUsage(target = '/') {
 export async function runWatchdog(now = Date.now()) {
   await fsp.mkdir(STATUS_DIR, { recursive: true, mode: 0o700 });
   const report = { at: new Date(now).toISOString(), actions: [], warnings: [], services: {} };
+
+  const ollama = await runSystemctl(['is-active', 'ollama.service']);
+  report.services.ollama = ollama.ok && ollama.stdout === 'active' ? 'active' : 'inactive';
+  if (report.services.ollama !== 'active') {
+    const r = await runSystemctl(['start', 'ollama.service']);
+    report.actions.push({ action: 'start_ollama', ok: r.ok });
+  }
+
+  const brainSvc = await runSystemctl(['is-active', 'osa-brain.service']);
+  report.services.brain = brainSvc.ok && brainSvc.stdout === 'active' ? 'active' : 'inactive';
+  let brainHealthy = false;
+  try {
+    const r = await fetch(`${BRAIN_URL}/health`, { signal: AbortSignal.timeout(3000) });
+    brainHealthy = r.ok;
+  } catch {}
+  report.brain = { healthy: brainHealthy };
+  if (report.services.brain !== 'active' || !brainHealthy) {
+    const r = await runSystemctl(['restart', 'osa-brain.service']);
+    report.actions.push({ action: 'restart_brain', ok: r.ok });
+  }
 
   const mediaTimer = await runSystemctl(['is-active', 'osa-media-worker.timer']);
   report.services.mediaTimer = mediaTimer.ok && mediaTimer.stdout === 'active' ? 'active' : 'inactive';

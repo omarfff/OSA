@@ -11,6 +11,7 @@ const DEFAULT_FEEDS = [
 const DEFAULT_OUTBOX = '/var/lib/osa-media/outbox';
 const DEFAULT_STATE = '/var/lib/osa-media/state.json';
 const MAX_FEED_BYTES = 2 * 1024 * 1024;
+const DEFAULT_BRAIN_URL = 'http://127.0.0.1:8787';
 
 export function decodeEntities(s) {
   return String(s || '')
@@ -76,6 +77,23 @@ export function buildScript(item) {
   ].filter(Boolean).join(' ');
 }
 
+export async function buildAiScript(item, { fetchImpl = fetch, brainUrl = process.env.OSA_BRAIN_URL || DEFAULT_BRAIN_URL } = {}) {
+  const fallback = buildScript(item);
+  try {
+    const u = new URL(brainUrl);
+    const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    if (u.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(host)) return fallback;
+    const res = await fetchImpl(new URL('/v1/think', u), {
+      method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(45000),
+      body: JSON.stringify({ mode: 'media', task: 'Turn this source item into a factual spoken AI brief.', context: { title: item.title, summary: item.summary, sourceUrl: item.url, sourceFeed: item.source } }),
+    });
+    if (!res.ok) return fallback;
+    const data = await res.json();
+    const text = stripMarkup(data?.text || '').replace(/\s+/g, ' ').trim();
+    return text.length >= 80 && text.length <= 1200 ? text : fallback;
+  } catch { return fallback; }
+}
+
 export function stableItemId(item) {
   return crypto.createHash('sha256').update(`${item.id}|${item.url}|${item.title}`).digest('hex').slice(0, 20);
 }
@@ -111,7 +129,7 @@ function run(cmd, args) {
 
 async function createVideo(item, outbox) {
   const id = stableItemId(item); const dir = path.join(outbox, id); await fs.mkdir(dir, { recursive: true });
-  const script = buildScript(item); const title = wrapText(item.title, 30, 6); const source = wrapText(new URL(item.url).hostname, 42, 2);
+  const fallbackScript = buildScript(item); const script = await buildAiScript(item); const scriptEngine = script === fallbackScript ? 'fallback' : 'osa-brain'; const title = wrapText(item.title, 30, 6); const source = wrapText(new URL(item.url).hostname, 42, 2);
   const scriptFile = path.join(dir, 'script.txt'), titleFile = path.join(dir, 'title.txt'), sourceFile = path.join(dir, 'source.txt');
   const audio = path.join(dir, 'voice.wav'), video = path.join(dir, 'short.mp4');
   await fs.writeFile(scriptFile, `${script}\n`); await fs.writeFile(titleFile, `${title}\n`); await fs.writeFile(sourceFile, `Source: ${source}\n`);
@@ -124,7 +142,7 @@ async function createVideo(item, outbox) {
     `drawtext=fontfile=${regular}:text='Informational summary - source linked':fontcolor=white:fontsize=26:x=(w-text_w)/2:y=1680`,
   ].join(',');
   await run('ffmpeg', ['-hide_banner','-loglevel','error','-y','-f','lavfi','-i','color=c=0x111827:s=1080x1920:r=30','-i',audio,'-vf',vf,'-c:v','libx264','-preset','veryfast','-crf','25','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-shortest','-movflags','+faststart',video]);
-  const metadata = { id, createdAt: new Date().toISOString(), title: stripMarkup(item.title), sourceUrl: item.url, sourceFeed: item.source, script, video };
+  const metadata = { id, createdAt: new Date().toISOString(), title: stripMarkup(item.title), sourceUrl: item.url, sourceFeed: item.source, script, scriptEngine, video };
   await fs.writeFile(path.join(dir, 'metadata.json'), `${JSON.stringify(metadata, null, 2)}\n`);
   return metadata;
 }

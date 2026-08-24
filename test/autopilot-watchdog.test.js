@@ -15,3 +15,11 @@ test('autopilot systemd unit uses isolated installed runtime path', () => {
   assert.doesNotMatch(unit, /\/opt\/osa\/gitops/);
   assert.match(unit, /ProtectSystem=strict/);
 });
+
+
+test('autopilot monitors local Ollama and OSA Brain services', () => {
+  const code = fs.readFileSync('tools/autopilot-watchdog.mjs', 'utf8');
+  assert.match(code, /ollama\.service/);
+  assert.match(code, /osa-brain\.service/);
+  assert.match(code, /127\.0\.0\.1:8787/);
+});
