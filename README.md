@@ -1,17 +1,45 @@
-# OSA Agent Trust Oracle
+# OSA
 
-A working MVP for choosing and verifying agent/API endpoints **before purchase**.
+OSA is a machine-commerce trust and procurement system for evaluating agent/API endpoints before purchase or routing spend.
 
-## What it does
+## Core product
 
-- `GET /best` — ranks matching endpoints by TrustScore, optional `intent` and `max_price`.
-- `GET /score` — performs live verification and returns TrustScore + confidence + reason codes.
-- `GET /history` — returns historical snapshots for an endpoint.
-- Snapshot persistence instead of only keeping latest state.
-- TrustScore includes uptime, latency, price drift, schema drift, payment changes, and transaction evidence.
-- Unified ingestion for manual records, MCP Registry-shaped records, and x402/Bazaar-shaped resources.
-- Optional x402 v2 payment protection for `/best` and `/score` using USDC.
-- Bazaar discovery extension metadata when x402 is enabled.
+OSA combines live endpoint verification with historical evidence and produces a TrustScore plus confidence and reason codes.
+
+- `GET /best` — rank matching endpoints by trust, intent and optional max price.
+- `GET /score` — live-verify a registered endpoint.
+- `GET /history` — return historical snapshots.
+- `POST /ingest` — authenticated registry ingestion.
+- `POST /sources/mcp` and `POST /sources/bazaar` — ingest MCP/Bazaar-shaped records.
+- `/.well-known/osa.json` — machine-readable product metadata.
+
+TrustScore currently considers uptime, latency, price stability, schema stability, payment stability and transaction evidence. Confidence is reported separately.
+
+## Architecture
+
+OSA uses a split-plane design:
+
+- **Product/Data/Commercial plane** — procurement/MCP distribution, pricing and benchmark history, endpoint observations, product usage, leads/deals and payment reconciliation.
+- **Control/Execution/Security plane** — VPS agents, approvals, task policy, audit/control alerts, SSH bridge and certificate-only RAW SSH execution.
+- **GitHub** — canonical source, CI/security scanning and controlled deployment workflows.
+
+The split keeps product data workloads separate from privileged infrastructure execution.
+
+## Security
+
+- Endpoint verification is read-only (`GET`/`HEAD`).
+- SSRF defenses reject local/private/link-local/documentation targets and unsafe URL schemes.
+- DNS results and redirect targets are revalidated.
+- Response size, redirect count, timeouts and concurrency are bounded.
+- Ingestion is authenticated in production.
+- Privileged VPS execution uses short-lived SSH certificates and host-key verification.
+- Secrets and private keys are not committed to this repository.
+
+## Commercial acquisition tool
+
+`npm run lead:audit -- https://example.com`
+
+The Lead-Leakage Audit performs a public-page, read-only conversion-path audit. It does not submit forms, authenticate, bypass controls or access private systems. It can be used as an evidence-first acquisition wedge for OSA services without becoming a separate product strategy.
 
 ## Quick start
 
@@ -21,47 +49,12 @@ npm test
 npm start
 ```
 
-Then ingest an endpoint:
+## Payments
 
-```bash
-curl -X POST http://localhost:4021/ingest \
-  -H 'content-type: application/json' \
-  -d '{"url":"https://example.com/api","intent":"search","priceUsd":0.01,"transactionEvidence":12}'
-```
+Optional x402 v2 payment middleware can protect `/best` and `/score`. Payments remain disabled when `OSA_PAY_TO` is not configured. Test/sandbox payment events must never be counted as revenue.
 
-Find the best endpoint:
+## Operating rule
 
-```bash
-curl 'http://localhost:4021/best?intent=search&max_price=0.05'
-```
+OSA is one product. Agent Trust Oracle, Procurement Guard, pricing/benchmark intelligence, MCP reliability and payment-rail checks are modules of the same pre-transaction decision system.
 
-## x402
-
-Payments are disabled by default so local development is frictionless. To enable them:
-
-```bash
-cp .env.example .env
-export OSA_PAY_TO=0xYOUR_WALLET
-export OSA_NETWORK=eip155:84532
-export OSA_FACILITATOR_URL=https://x402.org/facilitator
-npm start
-```
-
-Use Base Sepolia for testing first. When enabled, `/best` and `/score` are protected through the official x402 server packages and expose Bazaar discovery metadata.
-
-## TrustScore
-
-Current MVP weights:
-
-- uptime 30%
-- latency 20%
-- price stability 15%
-- schema stability 15%
-- payment stability 10%
-- transaction evidence 10%
-
-The API also returns `confidence` separately so a high score with weak evidence is distinguishable from a well-proven endpoint.
-
-## Production next steps
-
-Replace JSON persistence with Postgres/Supabase, add scheduled source crawlers, and deploy behind a stable HTTPS origin before turning on mainnet payments.
+Progress means verified external usage, verified payment and repeat usage — not internal test rows, crawler probes, generated dashboards or speculative revenue.
