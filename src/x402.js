@@ -1,6 +1,59 @@
-export async function buildPaymentMiddleware() {
-  const payTo = process.env.OSA_PAY_TO;
+const DEFAULT_TESTNET_FACILITATOR = "https://x402.org/facilitator";
+const TESTNET_NETWORKS = new Set([
+  "eip155:84532",
+  "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+  "stellar:testnet",
+  "aptos:2"
+]);
+
+function normalizeUrl(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+export function resolveX402Config(env = process.env) {
+  const payTo = String(env.OSA_PAY_TO || "").trim();
   if (!payTo) return null;
+
+  const network = String(env.OSA_NETWORK || "eip155:84532").trim();
+  const facilitatorUrl = String(env.OSA_FACILITATOR_URL || DEFAULT_TESTNET_FACILITATOR).trim();
+  const rawPrice = String(env.OSA_PRICE_USD || "0.01").trim();
+  const numericPrice = Number(rawPrice);
+
+  if (!network) throw new Error("x402 network is required when OSA_PAY_TO is configured");
+  if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+    throw new Error("OSA_PRICE_USD must be a finite positive number");
+  }
+
+  if (network.startsWith("eip155:") && !/^0x[a-fA-F0-9]{40}$/.test(payTo)) {
+    throw new Error("OSA_PAY_TO must be a 20-byte EVM address for eip155 networks");
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(facilitatorUrl);
+  } catch {
+    throw new Error("OSA_FACILITATOR_URL must be a valid URL");
+  }
+  if (parsed.protocol !== "https:") throw new Error("OSA_FACILITATOR_URL must use HTTPS");
+
+  const isTestnet = TESTNET_NETWORKS.has(network);
+  if (!isTestnet && normalizeUrl(facilitatorUrl) === DEFAULT_TESTNET_FACILITATOR) {
+    throw new Error("x402 mainnet requires an explicit production facilitator; x402.org/facilitator is testnet-only");
+  }
+
+  return {
+    payTo,
+    network,
+    facilitatorUrl,
+    price: `$${rawPrice}`,
+    isTestnet
+  };
+}
+
+export async function buildPaymentMiddleware() {
+  const config = resolveX402Config();
+  if (!config) return null;
+  const { payTo, network, facilitatorUrl, price } = config;
 
   const [{ paymentMiddleware }, { HTTPFacilitatorClient, x402ResourceServer }, evm, bazaar] = await Promise.all([
     import("@x402/express"),
@@ -9,9 +62,6 @@ export async function buildPaymentMiddleware() {
     import("@x402/extensions/bazaar")
   ]);
 
-  const network = process.env.OSA_NETWORK || "eip155:84532";
-  const facilitatorUrl = process.env.OSA_FACILITATOR_URL || "https://x402.org/facilitator";
-  const price = `$${process.env.OSA_PRICE_USD || "0.01"}`;
   const rawClient = new HTTPFacilitatorClient({ url: facilitatorUrl });
   const client = bazaar.withBazaar ? bazaar.withBazaar(rawClient) : rawClient;
   const server = new x402ResourceServer(client);
