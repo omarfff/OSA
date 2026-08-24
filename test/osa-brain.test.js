@@ -35,4 +35,5 @@ test('brain server refuses public bind and unit uses isolated runtime', () => {
   assert.match(unit, /\/usr\/local\/lib\/osa\/osa-brain\.mjs/);
   assert.doesNotMatch(unit, /\/opt\/osa\/gitops/);
   assert.match(unit, /ProtectSystem=strict/);
+  assert.doesNotMatch(unit, /MemoryDenyWriteExecute=true/);
 });
