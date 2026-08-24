@@ -65,3 +65,8 @@ test('repository knowledge pack has coverage and no obvious credential material'
   const hit = await retrieveKnowledge('why canonical git edits disappear', { knowledgeDir: 'knowledge', topK: 3 });
   assert.match(hit.text, /GitOps/);
 });
+
+test('brain installer restarts an already-running service after updating runtime or memory', () => {
+  const installer = fs.readFileSync('ops/install-brain.sh', 'utf8');
+  assert.match(installer, /systemctl restart osa-brain\.service/);
+});

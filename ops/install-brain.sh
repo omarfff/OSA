@@ -24,4 +24,5 @@ grep -q '^OSA_BRAIN_KNOWLEDGE_DIR=' /etc/osa/brain.env || echo 'OSA_BRAIN_KNOWLE
 chmod 0640 /etc/osa/brain.env
 install -m 0644 "$ROOT/ops/systemd/osa-brain.service" /etc/systemd/system/osa-brain.service
 systemctl daemon-reload
-systemctl enable --now osa-brain.service
+systemctl enable osa-brain.service >/dev/null
+systemctl restart osa-brain.service
