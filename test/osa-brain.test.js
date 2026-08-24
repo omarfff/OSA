@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { askBrain, createBrainServer, systemPrompt, validateLoopbackUrl } from '../tools/osa-brain.mjs';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { askBrain, createBrainServer, knowledgeStatus, retrieveKnowledge, systemPrompt, validateLoopbackUrl } from '../tools/osa-brain.mjs';
 
 test('brain only accepts loopback Ollama URLs', () => {
   assert.equal(validateLoopbackUrl('http://127.0.0.1:11434').hostname, '127.0.0.1');
@@ -13,27 +16,52 @@ test('brain only accepts loopback Ollama URLs', () => {
 test('brain system prompt forbids direct high-risk execution', () => {
   const p = systemPrompt('operator');
   assert.match(p, /Never execute tools, shell commands, transfers, trades, signatures/);
+  assert.match(p, /newer verified runtime evidence always overrides/);
   assert.match(systemPrompt('media'), /65-105 words/);
 });
 
 test('askBrain sends bounded local inference request', async () => {
   let seen;
-  const fakeFetch = async (_url, opts) => {
-    seen = JSON.parse(opts.body);
-    return { ok: true, json: async () => ({ message: { content: 'READY' } }) };
-  };
-  const out = await askBrain({ task: 'health', context: { a: 1 }, fetchImpl: fakeFetch });
-  assert.equal(out.text, 'READY');
-  assert.equal(seen.think, false);
-  assert.equal(seen.options.num_ctx, 4096);
+  const fakeFetch = async (_url, opts) => { seen = JSON.parse(opts.body); return { ok: true, json: async () => ({ message: { content: 'READY' } }) }; };
+  const out = await askBrain({ task: 'health', context: { a: 1 }, fetchImpl: fakeFetch, knowledgeDir: '/path/that/does/not/exist' });
+  assert.equal(out.text, 'READY'); assert.equal(seen.think, false); assert.equal(seen.options.num_ctx, 4096);
+  assert.match(seen.messages[1].content, /PERSISTENT OSA MEMORY/);
+});
+
+test('persistent knowledge retrieves relevant OSA memory', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'osa-kb-'));
+  try {
+    await fsp.writeFile(path.join(dir, 'payments.md'), '# Payments\nx402 mainnet requires a verified receiving address and production facilitator.');
+    await fsp.writeFile(path.join(dir, 'media.md'), '# Media\nMedia worker makes vertical videos from RSS.');
+    const hit = await retrieveKnowledge('What blocks x402 production payments?', { knowledgeDir: dir, topK: 2 });
+    assert.match(hit.text, /verified receiving address/); assert.ok(hit.sources.includes('payments.md'));
+    const status = await knowledgeStatus(dir); assert.equal(status.ok, true); assert.equal(status.files, 2); assert.ok(status.chunks >= 2);
+  } finally { await fsp.rm(dir, { recursive: true, force: true }); }
+});
+
+test('askBrain injects memory and keeps runtime context separate', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'osa-kb-'));
+  try {
+    await fsp.writeFile(path.join(dir, 'ops.md'), '# Revenue truth\nVerified revenue is zero until settlement evidence exists.');
+    let seen; const fakeFetch = async (_url, opts) => { seen = JSON.parse(opts.body); return { ok: true, json: async () => ({ message: { content: 'OK' } }) }; };
+    const out = await askBrain({ task: 'revenue truth', context: { runtime: 'payment pending' }, knowledgeDir: dir, fetchImpl: fakeFetch });
+    const user = seen.messages[1].content;
+    assert.match(user, /PERSISTENT OSA MEMORY/); assert.match(user, /settlement evidence/); assert.match(user, /VERIFIED\/RUNTIME CONTEXT/); assert.ok(out.memory_sources.includes('ops.md'));
+  } finally { await fsp.rm(dir, { recursive: true, force: true }); }
 });
 
 test('brain server refuses public bind and unit uses isolated runtime', () => {
   assert.throws(() => createBrainServer({ bind: '0.0.0.0', port: 8787 }), /loopback/);
   const unit = fs.readFileSync('ops/systemd/osa-brain.service', 'utf8');
-  assert.match(unit, /127\.0\.0\.1|brain\.env/);
-  assert.match(unit, /\/usr\/local\/lib\/osa\/osa-brain\.mjs/);
-  assert.doesNotMatch(unit, /\/opt\/osa\/gitops/);
-  assert.match(unit, /ProtectSystem=strict/);
-  assert.doesNotMatch(unit, /MemoryDenyWriteExecute=true/);
+  assert.match(unit, /127\.0\.0\.1|brain\.env/); assert.match(unit, /\/usr\/local\/lib\/osa\/osa-brain\.mjs/); assert.doesNotMatch(unit, /\/opt\/osa\/gitops/); assert.match(unit, /ProtectSystem=strict/); assert.doesNotMatch(unit, /MemoryDenyWriteExecute=true/);
+});
+
+test('repository knowledge pack has coverage and no obvious credential material', async () => {
+  const names = fs.readdirSync('knowledge').filter((x) => x.endsWith('.md'));
+  assert.ok(names.length >= 9);
+  const text = names.map((x) => fs.readFileSync(path.join('knowledge', x), 'utf8')).join('\n');
+  assert.match(text, /Agent Trust Oracle/); assert.match(text, /x402/); assert.match(text, /Lead Recovery Sprint/); assert.match(text, /Ollama/);
+  assert.doesNotMatch(text, /-----BEGIN (?:OPENSSH|RSA|EC) PRIVATE KEY-----/); assert.doesNotMatch(text, /\b(?:ghp_|github_pat_|sk-[A-Za-z0-9]{20})/); assert.doesNotMatch(text, /\bSA\d{22}\b/);
+  const hit = await retrieveKnowledge('why canonical git edits disappear', { knowledgeDir: 'knowledge', topK: 3 });
+  assert.match(hit.text, /GitOps/);
 });

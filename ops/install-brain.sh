@@ -7,6 +7,9 @@ id -u osa-brain >/dev/null 2>&1 || useradd --system --home /var/lib/osa-brain --
 install -d -o osa-brain -g osa-brain -m 0750 /var/lib/osa-brain
 install -d -o root -g root -m 0755 /usr/local/lib/osa
 install -m 0644 "$ROOT/tools/osa-brain.mjs" /usr/local/lib/osa/osa-brain.mjs
+install -d -o root -g osa-brain -m 0750 /usr/local/share/osa-brain/knowledge
+rm -f /usr/local/share/osa-brain/knowledge/*.md
+install -o root -g osa-brain -m 0640 "$ROOT"/knowledge/*.md /usr/local/share/osa-brain/knowledge/
 install -d -o root -g osa-brain -m 0750 /etc/osa
 if [ ! -f /etc/osa/brain.env ]; then
   cat >/etc/osa/brain.env <<'ENV'
@@ -17,6 +20,7 @@ OSA_BRAIN_PORT=8787
 ENV
 fi
 chown root:osa-brain /etc/osa/brain.env
+grep -q '^OSA_BRAIN_KNOWLEDGE_DIR=' /etc/osa/brain.env || echo 'OSA_BRAIN_KNOWLEDGE_DIR=/usr/local/share/osa-brain/knowledge' >> /etc/osa/brain.env
 chmod 0640 /etc/osa/brain.env
 install -m 0644 "$ROOT/ops/systemd/osa-brain.service" /etc/systemd/system/osa-brain.service
 systemctl daemon-reload
