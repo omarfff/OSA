@@ -1,0 +1,12 @@
+[Unit]
+Description=Generate an OSA faceless AI short every 6 hours
+
+[Timer]
+OnBootSec=10m
+OnUnitActiveSec=6h
+Persistent=true
+RandomizedDelaySec=10m
+Unit=osa-media-worker.service
+
+[Install]
+WantedBy=timers.target

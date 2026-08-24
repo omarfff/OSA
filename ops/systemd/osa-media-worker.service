@@ -1,0 +1,22 @@
+[Unit]
+Description=OSA Faceless Media Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=osa-media
+Group=osa-media
+WorkingDirectory=/opt/osa/gitops/OSA
+EnvironmentFile=/etc/osa/media-worker.env
+ExecStart=/usr/bin/node /opt/osa/gitops/OSA/tools/media-worker.mjs
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+StateDirectory=osa-media
+StateDirectoryMode=0750
+ReadWritePaths=/var/lib/osa-media
