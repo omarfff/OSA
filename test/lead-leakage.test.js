@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeHtml, isPrivateIp } from '../tools/lead-leakage-audit.mjs';
+import { analyzeHtml, isPrivateIp, auditUrl } from '../tools/lead-leakage-audit.mjs';
 
 test('scores a weak lead page higher', () => {
   const weak = analyzeHtml('<html><title>Property Co</title><p>Welcome</p></html>', { latencyMs: 3000, status: 200 });
@@ -16,6 +16,11 @@ test('caps opportunity score', () => {
 });
 
 test('blocks private and documentation IP ranges', () => {
-  for (const ip of ['127.0.0.1','10.1.2.3','172.20.1.1','192.168.1.2','169.254.1.1','192.0.2.1','198.51.100.1','203.0.113.1','::1','fc00::1','fe80::1','2001:db8::1']) assert.equal(isPrivateIp(ip), true, ip);
+  for (const ip of ['127.0.0.1','10.1.2.3','172.20.1.1','192.168.1.2','169.254.1.1','192.0.2.1','198.51.100.1','203.0.113.1','::1','fc00::1','fe80::1','2001:db8::1','::ffff:127.0.0.1','::ffff:10.0.0.1','::ffff:169.254.169.254']) assert.equal(isPrivateIp(ip), true, ip);
   assert.equal(isPrivateIp('1.1.1.1'), false);
+});
+
+
+test('rejects mapped loopback literal URLs before any request', async () => {
+  await assert.rejects(auditUrl('http://[::ffff:127.0.0.1]/'), /private_or_local_target/);
 });

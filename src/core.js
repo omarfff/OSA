@@ -4,7 +4,10 @@ import net from "node:net";
 import http from "node:http";
 import https from "node:https";
 
-const clamp = (n, min = 0, max = 1) => Math.max(min, Math.min(max, n));
+const clamp = (n, min = 0, max = 1) => {
+  const value = Number(n);
+  return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : min;
+};
 const pct = (n) => Math.round(clamp(n) * 100);
 
 export function endpointId(value) {
@@ -14,6 +17,18 @@ export function endpointId(value) {
 function normalizedPrice(value) {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function normalizedEvidence(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function boundedNumber(value, fallback, min, max, integer = false) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const bounded = Math.max(min, Math.min(max, n));
+  return integer ? Math.trunc(bounded) : bounded;
 }
 
 export function normalizeEndpoint(raw, source = "manual") {
@@ -35,7 +50,7 @@ export function normalizeEndpoint(raw, source = "manual") {
     priceUsd,
     schema: raw.schema || raw.outputSchema || raw.extensions?.bazaar?.schema || null,
     payment,
-    transactionEvidence: Number(raw.transactionEvidence ?? raw.transactions ?? raw.successfulTransactions ?? 0) || 0,
+    transactionEvidence: normalizedEvidence(raw.transactionEvidence ?? raw.transactions ?? raw.successfulTransactions ?? 0),
     metadata: raw.metadata || {}
   };
 }
@@ -49,13 +64,13 @@ export function inferSchemaSignature(payload) {
 
 export function calculateTrustScore(endpoint, current, previous = null) {
   const uptime = current.ok ? 1 : 0;
-  const latencyMs = Number(current.latencyMs ?? 9999);
+  const latencyMs = boundedNumber(current.latencyMs, 9999, 0, 86_400_000);
   const latency = clamp(1 - Math.log10(Math.max(1, latencyMs)) / 4);
 
   const currentPrice = normalizedPrice(current.priceUsd ?? endpoint.priceUsd);
   const previousPrice = normalizedPrice(previous?.priceUsd ?? endpoint.priceUsd);
-  const priceDrift = previousPrice && currentPrice !== null
-    ? clamp(Math.abs(currentPrice - previousPrice) / Math.max(previousPrice, 0.000001))
+  const priceDrift = previousPrice !== null && currentPrice !== null
+    ? clamp(Math.abs(currentPrice - previousPrice) / Math.max(Math.abs(previousPrice), 0.000001))
     : 0;
   const priceStability = 1 - priceDrift;
 
@@ -65,7 +80,7 @@ export function calculateTrustScore(endpoint, current, previous = null) {
   const paymentChanged = Boolean(previous?.paymentSignature && current.paymentSignature && previous.paymentSignature !== current.paymentSignature);
   const paymentStability = paymentChanged ? 0 : 1;
 
-  const tx = Number(current.transactionEvidence ?? endpoint.transactionEvidence ?? 0);
+  const tx = normalizedEvidence(current.transactionEvidence ?? endpoint.transactionEvidence ?? 0);
   const transactionEvidence = clamp(Math.log10(tx + 1) / 4);
 
   const weights = {
@@ -173,20 +188,33 @@ export async function validateTargetUrl(rawUrl) {
   return { url, addresses };
 }
 
+export function createPinnedLookup(pinned) {
+  const family = Number(pinned?.family) || net.isIP(String(pinned?.address || ''));
+  if (!pinned?.address || !family) throw new Error('invalid pinned address');
+  return (_hostname, options, callback) => {
+    if (options && typeof options === 'object' && options.all === true) {
+      callback(null, [{ address: pinned.address, family }]);
+      return;
+    }
+    callback(null, pinned.address, family);
+  };
+}
+
 async function requestOnce(rawUrl, method, timeoutMs, maxBytes) {
   const { url, addresses } = await validateTargetUrl(rawUrl);
   const pinned = addresses[0];
   const transport = url.protocol === 'https:' ? https : http;
+  const requestHostname = url.hostname.replace(/^\[|\]$/g, '');
   return await new Promise((resolve, reject) => {
     const req = transport.request({
       protocol: url.protocol,
-      hostname: url.hostname,
+      hostname: requestHostname,
       port: url.port || undefined,
       path: `${url.pathname}${url.search}`,
       method,
-      headers: { 'user-agent': 'OSA-Agent-Trust-Oracle/0.2', accept: 'application/json, */*;q=0.1' },
-      servername: url.hostname,
-      lookup: (_hostname, _options, callback) => callback(null, pinned.address, pinned.family)
+      headers: { 'user-agent': 'OSA-Agent-Trust-Oracle/0.3', accept: 'application/json, */*;q=0.1' },
+      servername: net.isIP(requestHostname) ? undefined : requestHostname,
+      lookup: createPinnedLookup(pinned)
     }, (res) => {
       const status = Number(res.statusCode || 0);
       const headers = res.headers;
@@ -222,17 +250,15 @@ async function requestOnce(rawUrl, method, timeoutMs, maxBytes) {
 async function safeRequest(rawUrl, method, timeoutMs, maxBytes, maxRedirects) {
   const started = Date.now();
   let current = rawUrl;
-  let previousProtocol = null;
   for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
     const remaining = timeoutMs - (Date.now() - started);
     if (remaining <= 0) throw Object.assign(new Error('endpoint request timed out'), { code: 'TIMEOUT' });
     const result = await requestOnce(current, method, remaining, maxBytes);
     if (!result.redirect) return result;
     const next = new URL(result.redirect);
-    if (previousProtocol === 'https:' && next.protocol === 'http:') {
+    if (result.url.protocol === 'https:' && next.protocol === 'http:') {
       throw Object.assign(new Error('HTTPS downgrade redirect refused'), { code: 'REDIRECT_DOWNGRADE' });
     }
-    previousProtocol = result.url.protocol;
     current = next.href;
   }
   throw Object.assign(new Error('too many endpoint redirects'), { code: 'TOO_MANY_REDIRECTS' });
@@ -240,10 +266,11 @@ async function safeRequest(rawUrl, method, timeoutMs, maxBytes, maxRedirects) {
 
 export async function liveVerify(endpoint, timeoutMs = 5000, options = {}) {
   const started = performance.now();
-  const maxBytes = Number(options.maxBytes || process.env.OSA_MAX_RESPONSE_BYTES || 262144);
-  const maxRedirects = Number(options.maxRedirects ?? process.env.OSA_MAX_REDIRECTS ?? 2);
+  const effectiveTimeoutMs = boundedNumber(timeoutMs, 5000, 250, 60_000, true);
+  const maxBytes = boundedNumber(options.maxBytes ?? process.env.OSA_MAX_RESPONSE_BYTES, 262144, 1024, 5 * 1024 * 1024, true);
+  const maxRedirects = boundedNumber(options.maxRedirects ?? process.env.OSA_MAX_REDIRECTS, 2, 0, 10, true);
   try {
-    const response = await safeRequest(endpoint.url, endpoint.method === 'GET' ? 'GET' : 'HEAD', timeoutMs, maxBytes, maxRedirects);
+    const response = await safeRequest(endpoint.url, endpoint.method === 'GET' ? 'GET' : 'HEAD', effectiveTimeoutMs, maxBytes, maxRedirects);
     const latencyMs = Math.round(performance.now() - started);
     let body = null;
     const type = String(response.headers['content-type'] || '');
@@ -259,7 +286,7 @@ export async function liveVerify(endpoint, timeoutMs = 5000, options = {}) {
       schemaSignature: body ? inferSchemaSignature(body) : null,
       paymentSignature: String(paymentHeader || JSON.stringify(endpoint.payment || null)),
       priceUsd: endpoint.priceUsd,
-      transactionEvidence: endpoint.transactionEvidence
+      transactionEvidence: normalizedEvidence(endpoint.transactionEvidence)
     };
   } catch (error) {
     return {
@@ -271,7 +298,7 @@ export async function liveVerify(endpoint, timeoutMs = 5000, options = {}) {
       schemaSignature: null,
       paymentSignature: JSON.stringify(endpoint.payment || null),
       priceUsd: endpoint.priceUsd,
-      transactionEvidence: endpoint.transactionEvidence
+      transactionEvidence: normalizedEvidence(endpoint.transactionEvidence)
     };
   }
 }

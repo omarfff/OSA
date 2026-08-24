@@ -8,7 +8,8 @@ const endpointsPath = path.join(dataDir, "endpoints.json");
 const snapshotsPath = path.join(dataDir, "snapshots.json");
 const remoteUrl = process.env.OSA_STORE_URL || "";
 const remoteKey = process.env.OSA_STORE_KEY || "";
-const remoteTimeoutMs = Math.max(1000, Number(process.env.OSA_STORE_TIMEOUT_MS || 6000));
+const parsedRemoteTimeoutMs = Number(process.env.OSA_STORE_TIMEOUT_MS);
+const remoteTimeoutMs = Number.isFinite(parsedRemoteTimeoutMs) ? Math.max(1000, Math.min(60_000, parsedRemoteTimeoutMs)) : 6000;
 
 function ensureFile(file, fallback = []) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -42,10 +43,13 @@ async function remoteCall(action, payload = {}) {
       body: JSON.stringify({ action, ...payload }),
       signal: controller.signal
     });
-    let body = {};
-    try { body = await response.json(); } catch { body = {}; }
+    const text = await response.text();
+    let body;
+    try { body = JSON.parse(text); }
+    catch { throw new Error(`remote store ${action} returned invalid JSON`); }
     if (!response.ok) throw new Error(`remote store ${action} failed with HTTP ${response.status}`);
-    if (body?.error) throw new Error(`remote store ${action} failed`);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error(`remote store ${action} returned invalid payload`);
+    if (body.error) throw new Error(`remote store ${action} failed`);
     return body;
   } finally {
     clearTimeout(timer);
@@ -81,7 +85,8 @@ export async function latestSnapshot(endpointId) {
 }
 
 export async function historyFor(endpointId, limit = 100) {
-  const safeLimit = Math.max(1, Math.min(500, Number(limit || 100)));
+  const parsed = Number(limit);
+  const safeLimit = Number.isInteger(parsed) && parsed >= 1 ? Math.min(500, parsed) : 100;
   if (remoteEnabled()) return (await remoteCall("history", { endpointId, limit: safeLimit })).snapshots || [];
   return readJson(snapshotsPath).filter((x) => x.endpointId === endpointId).slice(-safeLimit).reverse();
 }

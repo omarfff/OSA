@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { calculateTrustScore, normalizeEndpoint, inferSchemaSignature, isPublicIpAddress, validateTargetUrl } from "../src/core.js";
+import { calculateTrustScore, normalizeEndpoint, inferSchemaSignature, isPublicIpAddress, validateTargetUrl, createPinnedLookup } from "../src/core.js";
 
 test("normalizes Bazaar-like records", () => {
   const ep = normalizeEndpoint({ name: "Tool", resource: { url: "https://example.com/tool" }, accepts: [{ price: 0.02 }] }, "x402-bazaar");
@@ -43,4 +43,27 @@ test("SSRF guard rejects literal private targets, local names, credentials and u
   await assert.rejects(validateTargetUrl('file:///etc/passwd'), /http\/https/);
   const publicLiteral = await validateTargetUrl('https://8.8.8.8/');
   assert.equal(publicLiteral.addresses[0].address, '8.8.8.8');
+});
+
+
+test("detects price drift when an endpoint changes from free to paid", () => {
+  const ep = normalizeEndpoint({ url: "https://example.com", priceUsd: 0 });
+  const score = calculateTrustScore(ep, { ok: true, latencyMs: 50, priceUsd: 1, schemaSignature: "a:string", paymentSignature: "p", checkedAt: new Date().toISOString(), status: 200, transactionEvidence: 0 }, { priceUsd: 0, schemaSignature: "a:string", paymentSignature: "p" });
+  assert.ok(score.reasonCodes.includes("PRICE_DRIFT"));
+});
+
+test("never produces NaN scores from invalid telemetry", () => {
+  const ep = normalizeEndpoint({ url: "https://example.com", transactionEvidence: -5 });
+  const score = calculateTrustScore(ep, { ok: true, latencyMs: Number.NaN, schemaSignature: "a:string", paymentSignature: "p", checkedAt: new Date().toISOString(), status: 200, transactionEvidence: -10 }, null);
+  assert.ok(Number.isInteger(score.score));
+  assert.ok(score.score >= 0 && score.score <= 100);
+  assert.equal(ep.transactionEvidence, 0);
+});
+
+test("pinned DNS lookup supports Node all=true contract", async () => {
+  const lookup = createPinnedLookup({ address: "93.184.216.34", family: 4 });
+  const rows = await new Promise((resolve, reject) => lookup("example.com", { all: true }, (err, value) => err ? reject(err) : resolve(value)));
+  assert.deepEqual(rows, [{ address: "93.184.216.34", family: 4 }]);
+  const single = await new Promise((resolve, reject) => lookup("example.com", {}, (err, address, family) => err ? reject(err) : resolve({ address, family })));
+  assert.deepEqual(single, { address: "93.184.216.34", family: 4 });
 });

@@ -4,37 +4,23 @@ import https from 'node:https';
 import net from 'node:net';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { isPublicIpAddress } from '../src/core.js';
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const TIMEOUT_MS = 10000;
 
 export function isPrivateIp(ip) {
-  if (net.isIPv4(ip)) {
-    const [a,b,c] = ip.split('.').map(Number);
-    return a === 0 || a === 10 || a === 127 ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 192 && b === 0 && c === 2) ||
-      (a === 198 && (b === 18 || b === 19)) ||
-      (a === 198 && b === 51 && c === 100) ||
-      (a === 203 && b === 0 && c === 113) || a >= 224;
-  }
-  if (net.isIPv6(ip)) {
-    const v = ip.toLowerCase();
-    return v === '::' || v === '::1' || v.startsWith('fc') || v.startsWith('fd') || /^fe[89ab]/.test(v) || v.startsWith('2001:db8:');
-  }
-  return true;
+  const normalized = String(ip || '').toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
+  return !isPublicIpAddress(normalized);
 }
 
 function parseTarget(input) {
   const u = new URL(input);
   if (!['http:', 'https:'].includes(u.protocol)) throw new Error('unsupported_protocol');
   if (u.username || u.password) throw new Error('credentials_in_url_not_allowed');
-  const h = u.hostname.toLowerCase();
-  if (h === 'localhost' || h.endsWith('.local') || (net.isIP(h) && isPrivateIp(h))) throw new Error('private_or_local_target');
+  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || (net.isIP(h) && isPrivateIp(h))) throw new Error('private_or_local_target');
   return u;
 }
 
