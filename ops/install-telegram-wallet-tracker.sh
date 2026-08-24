@@ -2,6 +2,8 @@
 set -euo pipefail
 id osa-telegram >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin osa-telegram
 install -d -m 0755 /etc/osa
+install -d -m 0755 /usr/local/lib/osa
+install -m 0644 tools/telegram-wallet-tracker.mjs /usr/local/lib/osa/telegram-wallet-tracker.mjs
 if [[ ! -f /etc/osa/telegram-wallet-tracker.env ]]; then
   umask 077
   cat >/etc/osa/telegram-wallet-tracker.env <<'EOF'

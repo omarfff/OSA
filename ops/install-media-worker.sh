@@ -4,6 +4,8 @@ command -v ffmpeg >/dev/null || { echo 'ffmpeg missing' >&2; exit 2; }
 command -v espeak-ng >/dev/null || { echo 'espeak-ng missing' >&2; exit 2; }
 id osa-media >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin osa-media
 install -d -m 0755 /etc/osa
+install -d -m 0755 /usr/local/lib/osa
+install -m 0644 tools/media-worker.mjs /usr/local/lib/osa/media-worker.mjs
 if [[ ! -f /etc/osa/media-worker.env ]]; then
   umask 077
   cat >/etc/osa/media-worker.env <<'EOF'
