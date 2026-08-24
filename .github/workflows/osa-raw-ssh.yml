@@ -47,6 +47,8 @@ jobs:
           EXPECTED_FP="$(jq -r '.host_ed25519_fingerprint' <<<"$CLAIM")"
           CERT="$(jq -r '.certificate' <<<"$CLAIM")"
           CMD_B64="$(jq -r '.command_b64' <<<"$CLAIM")"
+          REPORT_TOKEN="$(jq -r '.report_token' <<<"$CLAIM")"
+          test ${#REPORT_TOKEN} -eq 64
           printf '%s\n' "$CERT" > /tmp/osa_key-cert.pub
           chmod 600 /tmp/osa_key /tmp/osa_key-cert.pub
           printf '%s' "$CMD_B64" | base64 -d > /tmp/osa_command.sh
@@ -61,8 +63,18 @@ jobs:
           RC=$?
           set -e
 
-          REPORT_PAYLOAD="$(jq -n --arg action report --arg job_id "$JOB_ID" --argjson exit_code "$RC" --rawfile stdout /tmp/osa_stdout --rawfile stderr /tmp/osa_stderr '{action:$action,job_id:$job_id,exit_code:$exit_code,stdout:$stdout,stderr:$stderr}')"
-          curl -fsSL -H "Authorization: Bearer ${OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$REPORT_PAYLOAD" "$BROKER_URL" >/dev/null
+          REPORT_PAYLOAD="$(jq -n --arg action report --arg job_id "$JOB_ID" --arg report_token "$REPORT_TOKEN" --argjson exit_code "$RC" --rawfile stdout /tmp/osa_stdout --rawfile stderr /tmp/osa_stderr '{action:$action,job_id:$job_id,report_token:$report_token,exit_code:$exit_code,stdout:$stdout,stderr:$stderr}')"
+          REPORT_OK=0
+          for ATTEMPT in 1 2 3; do
+            REPORT_OIDC_TOKEN="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value')"
+            REPORT_FILE="$(mktemp)"
+            REPORT_HTTP="$(curl -sS -o "$REPORT_FILE" -w '%{http_code}' -H "Authorization: Bearer ${REPORT_OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$REPORT_PAYLOAD" "$BROKER_URL" || true)"
+            if [[ "$REPORT_HTTP" =~ ^2[0-9][0-9]$ ]]; then REPORT_OK=1; cat "$REPORT_FILE"; break; fi
+            echo "RAW SSH report attempt ${ATTEMPT} failed HTTP ${REPORT_HTTP}" >&2
+            cat "$REPORT_FILE" >&2 || true
+            sleep "$ATTEMPT"
+          done
+          if [ "$REPORT_OK" -ne 1 ]; then exit 23; fi
 
           if [ "$GITHUB_EVENT_NAME" = "issues" ]; then
             ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
