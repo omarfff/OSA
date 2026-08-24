@@ -1,0 +1,12 @@
+[Unit]
+Description=Run OSA Autopilot Watchdog every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+Unit=osa-autopilot-watchdog.service
+
+[Install]
+WantedBy=timers.target

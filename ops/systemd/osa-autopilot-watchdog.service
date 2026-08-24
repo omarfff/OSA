@@ -1,0 +1,19 @@
+[Unit]
+Description=OSA Autopilot Watchdog
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/node /usr/local/lib/osa/autopilot-watchdog.mjs
+Environment=OSA_AUTOPILOT_STATE=/var/lib/osa-autopilot
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/osa-autopilot
+
+[Install]
+WantedBy=multi-user.target
