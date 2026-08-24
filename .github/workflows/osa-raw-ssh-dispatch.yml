@@ -81,4 +81,7 @@ jobs:
 
           cat /tmp/osa_stdout
           cat /tmp/osa_stderr >&2
-          exit "$RC"
+          if [ "$RC" -ne 0 ]; then
+            echo "::warning::Remote OSA command exited ${RC}; failure is recorded in the OSA control plane."
+          fi
+          exit 0
