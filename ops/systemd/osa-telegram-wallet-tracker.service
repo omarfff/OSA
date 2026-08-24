@@ -1,0 +1,27 @@
+[Unit]
+Description=OSA Telegram Solana Wallet Tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=osa-telegram
+Group=osa-telegram
+WorkingDirectory=/opt/osa/gitops/OSA
+EnvironmentFile=/etc/osa/telegram-wallet-tracker.env
+ExecStart=/usr/bin/node /opt/osa/gitops/OSA/tools/telegram-wallet-tracker.mjs
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+StateDirectory=osa-telegram
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/osa-telegram
+
+[Install]
+WantedBy=multi-user.target
