@@ -200,12 +200,40 @@ export function createPinnedLookup(pinned) {
   };
 }
 
-async function requestOnce(rawUrl, method, timeoutMs, maxBytes) {
-  const { url, addresses } = await validateTargetUrl(rawUrl);
+function timeoutError() {
+  return Object.assign(new Error('endpoint request timed out'), { code: 'TIMEOUT' });
+}
+
+async function withDeadline(promise, deadlineMs) {
+  const remaining = deadlineMs - Date.now();
+  if (remaining <= 0) throw timeoutError();
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(timeoutError()), remaining); })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function requestOnce(rawUrl, method, deadlineMs, maxBytes) {
+  const { url, addresses } = await withDeadline(validateTargetUrl(rawUrl), deadlineMs);
   const pinned = addresses[0];
   const transport = url.protocol === 'https:' ? https : http;
   const requestHostname = url.hostname.replace(/^\[|\]$/g, '');
+  const remaining = deadlineMs - Date.now();
+  if (remaining <= 0) throw timeoutError();
   return await new Promise((resolve, reject) => {
+    let settled = false;
+    let deadlineTimer;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadlineTimer);
+      fn(value);
+    };
     const req = transport.request({
       protocol: url.protocol,
       hostname: requestHostname,
@@ -220,12 +248,12 @@ async function requestOnce(rawUrl, method, timeoutMs, maxBytes) {
       const headers = res.headers;
       if (status >= 300 && status < 400 && headers.location) {
         res.resume();
-        resolve({ status, headers, body: '', redirect: new URL(headers.location, url).href, url });
+        finish(resolve, { status, headers, body: '', redirect: new URL(headers.location, url).href, url });
         return;
       }
       if (method === 'HEAD') {
         res.resume();
-        resolve({ status, headers, body: '', redirect: null, url });
+        finish(resolve, { status, headers, body: '', redirect: null, url });
         return;
       }
       let size = 0;
@@ -238,22 +266,20 @@ async function requestOnce(rawUrl, method, timeoutMs, maxBytes) {
         }
         chunks.push(chunk);
       });
-      res.on('end', () => resolve({ status, headers, body: Buffer.concat(chunks).toString('utf8'), redirect: null, url }));
-      res.on('error', reject);
+      res.on('end', () => finish(resolve, { status, headers, body: Buffer.concat(chunks).toString('utf8'), redirect: null, url }));
+      res.on('error', (err) => finish(reject, err));
     });
-    req.setTimeout(timeoutMs, () => req.destroy(Object.assign(new Error('endpoint request timed out'), { code: 'TIMEOUT' })));
-    req.on('error', reject);
+    deadlineTimer = setTimeout(() => req.destroy(timeoutError()), remaining);
+    req.on('error', (err) => finish(reject, err));
     req.end();
   });
 }
 
 async function safeRequest(rawUrl, method, timeoutMs, maxBytes, maxRedirects) {
-  const started = Date.now();
+  const deadlineMs = Date.now() + timeoutMs;
   let current = rawUrl;
   for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
-    const remaining = timeoutMs - (Date.now() - started);
-    if (remaining <= 0) throw Object.assign(new Error('endpoint request timed out'), { code: 'TIMEOUT' });
-    const result = await requestOnce(current, method, remaining, maxBytes);
+    const result = await requestOnce(current, method, deadlineMs, maxBytes);
     if (!result.redirect) return result;
     const next = new URL(result.redirect);
     if (result.url.protocol === 'https:' && next.protocol === 'http:') {
