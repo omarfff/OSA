@@ -18,7 +18,7 @@ jobs:
       - name: Execute raw SSH job
         shell: bash
         env:
-          BROKER_URL: https://jpnlmpqqtiwisxcsjwbm.supabase.co/functions/v1/osa-github-ssh-broker
+          BROKER_URL: https://jpnlmpqqtiwisxcsjwbm.supabase.co/functions/v1/osa-github-ssh-broker-canary
         run: |
           set -euo pipefail
           JOB_ID="$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/ops/raw-ssh-trigger.txt" | tr -d '\r\n[:space:]')"
@@ -30,8 +30,15 @@ jobs:
           CLAIM_FILE="$(mktemp)"
           CLAIM_HTTP="$(curl -sS -o "$CLAIM_FILE" -w '%{http_code}' -H "Authorization: Bearer ${OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$CLAIM_PAYLOAD" "$BROKER_URL" || true)"
           if [ "$CLAIM_HTTP" = "409" ]; then
-            echo "RAW SSH job ${JOB_ID} already claimed; idempotent no-op."
-            exit 0
+            CLAIM_ERROR="$(jq -r '.error // empty' "$CLAIM_FILE" 2>/dev/null || true)"
+            CLAIM_STATE="$(jq -r '.state // empty' "$CLAIM_FILE" 2>/dev/null || true)"
+            if [ "$CLAIM_ERROR" = "job_not_pending" ] && [ "$CLAIM_STATE" = "succeeded" ]; then
+              echo "RAW SSH job ${JOB_ID} already succeeded; idempotent no-op."
+              exit 0
+            fi
+            echo "RAW SSH claim conflict HTTP 409 error=${CLAIM_ERROR:-unknown} state=${CLAIM_STATE:-unknown}" >&2
+            cat "$CLAIM_FILE" >&2 || true
+            exit 24
           fi
           if ! [[ "$CLAIM_HTTP" =~ ^2[0-9][0-9]$ ]]; then
             echo "RAW SSH claim failed HTTP ${CLAIM_HTTP}" >&2
@@ -82,6 +89,7 @@ jobs:
           cat /tmp/osa_stdout
           cat /tmp/osa_stderr >&2
           if [ "$RC" -ne 0 ]; then
-            echo "::warning::Remote OSA command exited ${RC}; failure is recorded in the OSA control plane."
+            echo "::error::Remote OSA command exited ${RC}; failure is recorded in the OSA control plane."
+            exit "$RC"
           fi
           exit 0
