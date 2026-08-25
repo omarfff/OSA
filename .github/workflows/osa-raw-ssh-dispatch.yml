@@ -18,7 +18,7 @@ jobs:
       - name: Execute raw SSH job
         shell: bash
         env:
-          BROKER_URL: https://jpnlmpqqtiwisxcsjwbm.supabase.co/functions/v1/osa-github-ssh-broker
+          BROKER_URL: https://jpnlmpqqtiwisxcsjwbm.supabase.co/functions/v1/osa-github-ssh-broker-canary
         run: |
           set -euo pipefail
           JOB_ID="$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/ops/raw-ssh-trigger.txt" | tr -d '\r\n[:space:]')"
@@ -55,15 +55,56 @@ jobs:
           CMD_B64="$(jq -r '.command_b64' <<<"$CLAIM")"
           REPORT_TOKEN="$(jq -r '.report_token' <<<"$CLAIM")"
           test ${#REPORT_TOKEN} -eq 64
+          CLAIM_ACTIVE=1
+          REMOTE_STARTED=0
+          release_preflight_claim() {
+            RC_LOCAL=$?
+            trap - EXIT
+            if [ "$RC_LOCAL" -ne 0 ] && [ "${CLAIM_ACTIVE:-0}" -eq 1 ] && [ "${REMOTE_STARTED:-0}" -eq 0 ]; then
+              set +e
+              for RELEASE_ATTEMPT in 1 2 3; do
+                RELEASE_OIDC_TOKEN="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value' 2>/dev/null)"
+                RELEASE_PAYLOAD="$(jq -n --arg action release --arg job_id "$JOB_ID" --arg report_token "$REPORT_TOKEN" --arg reason "runner_preflight_exit_${RC_LOCAL}" '{action:$action,job_id:$job_id,report_token:$report_token,reason:$reason}')"
+                RELEASE_FILE="$(mktemp)"
+                RELEASE_HTTP="$(curl -sS -o "$RELEASE_FILE" -w '%{http_code}' -H "Authorization: Bearer ${RELEASE_OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$RELEASE_PAYLOAD" "$BROKER_URL" || true)"
+                if [[ "$RELEASE_HTTP" =~ ^2[0-9][0-9]$ ]]; then
+                  echo "RAW SSH preflight claim released for retry."
+                  CLAIM_ACTIVE=0
+                  break
+                fi
+                echo "RAW SSH preflight release attempt ${RELEASE_ATTEMPT} failed HTTP ${RELEASE_HTTP}" >&2
+                cat "$RELEASE_FILE" >&2 || true
+                sleep "$RELEASE_ATTEMPT"
+              done
+              set -e
+            fi
+            exit "$RC_LOCAL"
+          }
+          trap release_preflight_claim EXIT
 
           printf '%s\n' "$CERT" > /tmp/osa_key-cert.pub
           chmod 600 /tmp/osa_key /tmp/osa_key-cert.pub
           printf '%s' "$CMD_B64" | base64 -d > /tmp/osa_command.sh
           chmod 600 /tmp/osa_command.sh
-          ssh-keyscan -T 10 -p "$PORT" -t ed25519 "$HOST" > /tmp/known_hosts 2>/dev/null
+          if grep -qx '# OSA_TEST_PREFLIGHT_RELEASE' /tmp/osa_command.sh; then
+            echo "Intentional canary preflight failure." >&2
+            false
+          fi
+
+          SCAN_OK=0
+          for SCAN_ATTEMPT in 1 2 3; do
+            if ssh-keyscan -T 10 -p "$PORT" -t ed25519 "$HOST" > /tmp/known_hosts 2>/dev/null; then
+              SCAN_OK=1
+              break
+            fi
+            echo "ssh-keyscan attempt ${SCAN_ATTEMPT} failed" >&2
+            sleep "$SCAN_ATTEMPT"
+          done
+          if [ "$SCAN_OK" -ne 1 ]; then echo "ssh-keyscan exhausted retries" >&2; exit 31; fi
           ACTUAL_FP="$(ssh-keygen -lf /tmp/known_hosts | awk 'NR==1{print $2}')"
           if [ "$ACTUAL_FP" != "$EXPECTED_FP" ]; then echo "host key fingerprint mismatch" >&2; exit 3; fi
 
+          REMOTE_STARTED=1
           set +e
           ssh -p "$PORT" -i /tmp/osa_key -o CertificateFile=/tmp/osa_key-cert.pub -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/tmp/known_hosts -o ConnectTimeout=15 "${PRINCIPAL}@${HOST}" 'bash -s' < /tmp/osa_command.sh > /tmp/osa_stdout 2> /tmp/osa_stderr
           RC=$?
@@ -85,6 +126,8 @@ jobs:
             sleep "$ATTEMPT"
           done
           if [ "$REPORT_OK" -ne 1 ]; then exit 23; fi
+          CLAIM_ACTIVE=0
+          trap - EXIT
 
           cat /tmp/osa_stdout
           cat /tmp/osa_stderr >&2
