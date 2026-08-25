@@ -6,6 +6,9 @@ import { buildPaymentMiddleware } from "./x402.js";
 import { paymentOptions } from "./payment-options.js";
 
 const app = express();
+// The Oracle is only exposed behind an internal reverse proxy. Trust one proxy hop
+// so x402 advertises the original HTTPS resource URL instead of Docker HTTP.
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(express.json({ limit: "1mb" }));
 
