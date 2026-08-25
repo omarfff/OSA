@@ -31,3 +31,15 @@ install -m 0644 "$ROOT/ops/systemd/osa-brain.service" /etc/systemd/system/osa-br
 systemctl daemon-reload
 systemctl enable osa-brain.service >/dev/null
 systemctl restart osa-brain.service
+PORT=$(awk -F= '$1 == "OSA_BRAIN_PORT" { print $2 }' /etc/osa/brain.env | tail -n 1)
+PORT=${PORT:-8787}
+READY=0
+for _ in $(seq 1 30); do
+  if curl --max-time 2 -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then READY=1; break; fi
+  sleep 0.5
+done
+if [ "$READY" -ne 1 ]; then
+  echo 'osa-brain readiness check failed' >&2
+  systemctl status osa-brain.service --no-pager >&2 || true
+  exit 4
+fi

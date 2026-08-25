@@ -120,3 +120,10 @@ test('askBrain repairs a draft that invents an unsupported script name', async (
   assert.equal(out.grounding_repaired, true);
   assert.doesNotMatch(out.text, /osa_fix_unverified_buyer_logic/);
 });
+
+test('brain installer waits for real HTTP readiness after restart', () => {
+  const install = fs.readFileSync('ops/install-brain.sh', 'utf8');
+  assert.match(install, /readiness check failed/);
+  assert.match(install, /127\.0\.0\.1:\$\{PORT\}\/health/);
+  assert.match(install, /for _ in \$\(seq 1 30\)/);
+});
