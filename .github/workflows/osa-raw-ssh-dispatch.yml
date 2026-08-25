@@ -86,11 +86,6 @@ jobs:
           chmod 600 /tmp/osa_key /tmp/osa_key-cert.pub
           printf '%s' "$CMD_B64" | base64 -d > /tmp/osa_command.sh
           chmod 600 /tmp/osa_command.sh
-          if grep -qx '# OSA_TEST_PREFLIGHT_RELEASE' /tmp/osa_command.sh; then
-            echo "Intentional canary preflight failure." >&2
-            false
-          fi
-
           SCAN_OK=0
           for SCAN_ATTEMPT in 1 2 3; do
             if ssh-keyscan -T 10 -p "$PORT" -t ed25519 "$HOST" > /tmp/known_hosts 2>/dev/null; then
