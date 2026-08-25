@@ -28,3 +28,19 @@ test('rejects invalid history limit and max price', async () => {
   assert.equal((await fetch(`${base}/best?max_price=abc`)).status, 400);
   assert.equal((await fetch(`${base}/best?max_price=-1`)).status, 400);
 });
+
+test('payment options expose public receive rails without secrets', async () => {
+  const response = await fetch(`${base}/payment-options`);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.preferred.humanStablecoin.network, 'Base');
+  assert.equal(body.preferred.humanStablecoin.asset, 'USDC');
+  assert.equal(body.preferred.humanStablecoin.address, '0x04e8930d13A6f6A258aA1488eeFa500ca8Cd9ebB');
+  assert.equal(body.directCrypto.some((x) => x.network === 'Solana' && x.address === '5JwtYANBUcCXiWxJtgyNDYxiKtYjpwd349xRF2mMSyN1'), true);
+  assert.equal(body.directCrypto.some((x) => x.network === 'TRON' && x.address === 'TXzMju2v6QoevWaMkPaSwEuN6HbFibWW7o'), true);
+  assert.equal(body.directCrypto.some((x) => x.network === 'Bitcoin' && x.address === 'bc1qpg5zxqps9038vfgpjganvrf5pvq8ykk29ft9eq'), true);
+  assert.equal(body.fiat.bankTransfer.publicBankDetails, false);
+  assert.equal(body.safety.secretsExposed, false);
+  const text = JSON.stringify(body).toLowerCase();
+  for (const forbidden of ['private_key', 'privatekey', 'mnemonic', 'seed phrase', 'passphrase']) assert.equal(text.includes(forbidden), false);
+});
