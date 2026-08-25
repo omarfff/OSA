@@ -98,3 +98,25 @@ test('watchdog writes only verified remediation events into experience memory', 
   assert.match(watchdog, /report\.actions\.length/);
   assert.match(watchdog, /EXPERIENCE_FILE/);
 });
+
+test('grounding guard detects invented operational identifiers', async () => {
+  const { unsupportedOperationalIdentifiers } = await import('../tools/osa-brain.mjs');
+  assert.deepEqual(unsupportedOperationalIdentifiers('Run `osa_fix_unverified_buyer_logic` now', 'safe reversible task'), ['osa_fix_unverified_buyer_logic']);
+  assert.deepEqual(unsupportedOperationalIdentifiers('Use `osa-brain.service`', 'verified service osa-brain.service is active'), []);
+});
+
+test('askBrain repairs a draft that invents an unsupported script name', async () => {
+  let calls = 0;
+  const fakeFetch = async (_url, opts) => {
+    calls += 1;
+    const body = JSON.parse(opts.body);
+    assert.equal(body.think, false);
+    if (calls === 1) return { ok: true, json: async () => ({ message: { content: 'Run `osa_fix_unverified_buyer_logic` now.' } }) };
+    return { ok: true, json: async () => ({ message: { content: 'Execute the safe reversible task automatically, verify it, record the outcome, and escalate only if it becomes sensitive or binding.' } }) };
+  };
+  const { askBrain } = await import('../tools/osa-brain.mjs');
+  const out = await askBrain({ task: 'How should a safe reversible task be handled?', context: { verified_runtime: 'No binding approval is needed.' }, fetchImpl: fakeFetch, knowledgeDir: new URL('../knowledge', import.meta.url).pathname });
+  assert.equal(calls, 2);
+  assert.equal(out.grounding_repaired, true);
+  assert.doesNotMatch(out.text, /osa_fix_unverified_buyer_logic/);
+});
