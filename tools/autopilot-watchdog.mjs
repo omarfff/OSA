@@ -10,6 +10,7 @@ const MEDIA_ROOT = process.env.OSA_MEDIA_ROOT || '/var/lib/osa-media/outbox';
 const TELEGRAM_ENV = process.env.OSA_TELEGRAM_ENV || '/etc/osa/telegram-wallet-tracker.env';
 const MEDIA_MAX_AGE_MS = Number(process.env.OSA_MEDIA_MAX_AGE_MS || 8 * 60 * 60 * 1000);
 const BRAIN_URL = process.env.OSA_BRAIN_URL || 'http://127.0.0.1:8787';
+const EXPERIENCE_FILE = process.env.OSA_BRAIN_EXPERIENCE_FILE || '/var/lib/osa-brain/experiences.jsonl';
 
 async function runSystemctl(args) {
   try {
@@ -106,6 +107,10 @@ export async function runWatchdog(now = Date.now()) {
   const dst = path.join(STATUS_DIR, 'status.json');
   await fsp.writeFile(tmp, JSON.stringify(report, null, 2), { mode: 0o600 });
   await fsp.rename(tmp, dst);
+  if (report.actions.length || report.warnings.length) {
+    const event = { at: report.at, kind: 'runtime_lesson', summary: `Autopilot observed ${report.actions.length} action(s) and ${report.warnings.length} warning(s)`, evidence: JSON.stringify({ services: report.services, actions: report.actions, warnings: report.warnings, disk: report.disk }), result: report.actions.every((x) => x.ok) ? 'actions_succeeded' : 'action_failed', lesson: 'Use verified service state and remediation outcomes in future diagnosis.', tags: ['autopilot','runtime','self-heal'] };
+    try { await fsp.appendFile(EXPERIENCE_FILE, JSON.stringify(event) + '\n', { encoding: 'utf8' }); } catch {}
+  }
   return report;
 }
 

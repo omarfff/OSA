@@ -8,6 +8,7 @@ const DEFAULT_OLLAMA_URL = process.env.OSA_OLLAMA_URL || 'http://127.0.0.1:11434
 const DEFAULT_BIND = process.env.OSA_BRAIN_BIND || '127.0.0.1';
 const DEFAULT_PORT = Number(process.env.OSA_BRAIN_PORT || 8787);
 const DEFAULT_KNOWLEDGE_DIR = process.env.OSA_BRAIN_KNOWLEDGE_DIR || '/usr/local/share/osa-brain/knowledge';
+const DEFAULT_EXPERIENCE_FILE = process.env.OSA_BRAIN_EXPERIENCE_FILE || '/var/lib/osa-brain/experiences.jsonl';
 const MAX_BODY = 64 * 1024;
 const KNOWLEDGE_CHUNK_SIZE = 1200;
 const MODES = new Set(['operator', 'media', 'sales', 'diagnose']);
@@ -84,6 +85,83 @@ export async function retrieveKnowledge(query, { knowledgeDir = DEFAULT_KNOWLEDG
   return { text: chosen.map((x) => x.rendered).join('\n\n'), sources: [...new Set(chosen.map((x) => x.file))], chunks: db.chunks.length };
 }
 
+
+const EXPERIENCE_KINDS = new Set(['owner_feedback', 'verified_outcome', 'runtime_lesson', 'commercial_outcome']);
+
+function cleanExperienceText(value, max = 1400) {
+  return String(value ?? '').replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+export function normalizeExperience(event = {}) {
+  const kind = cleanExperienceText(event.kind, 40);
+  if (!EXPERIENCE_KINDS.has(kind)) throw new Error('invalid_experience_kind');
+  const summary = cleanExperienceText(event.summary, 800);
+  if (!summary) throw new Error('experience_summary_required');
+  const evidence = cleanExperienceText(event.evidence, 1600);
+  const lesson = cleanExperienceText(event.lesson, 1200);
+  const result = cleanExperienceText(event.result, 240);
+  const decision = cleanExperienceText(event.decision, 500);
+  const tags = [...new Set((Array.isArray(event.tags) ? event.tags : []).map((x) => cleanExperienceText(x, 48)).filter(Boolean))].slice(0, 12);
+  const serialized = JSON.stringify({ summary, evidence, lesson, result, decision });
+  if (/-----BEGIN [^-]*PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{16,}\b|\bSA\d{20,}\b/i.test(serialized)) throw new Error('sensitive_material_rejected');
+  return { at: new Date().toISOString(), kind, summary, evidence, lesson, result, decision, tags };
+}
+
+export async function appendExperience(event, { experienceFile = DEFAULT_EXPERIENCE_FILE } = {}) {
+  const normalized = normalizeExperience(event);
+  const file = path.resolve(String(experienceFile));
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.appendFile(file, JSON.stringify(normalized) + '\n', { encoding: 'utf8', mode: 0o600 });
+  return normalized;
+}
+
+export async function loadExperiences(experienceFile = DEFAULT_EXPERIENCE_FILE) {
+  try {
+    const raw = await fs.readFile(path.resolve(String(experienceFile)), 'utf8');
+    const lines = raw.split(/\r?\n/).filter(Boolean).slice(-250);
+    const items = [];
+    for (const line of lines) {
+      try {
+        const x = JSON.parse(line);
+        if (!EXPERIENCE_KINDS.has(String(x?.kind || '')) || !x?.summary) continue;
+        const text = [x.summary, x.evidence, x.lesson, x.result, x.decision, ...(x.tags || [])].filter(Boolean).join(' ');
+        items.push({ ...x, terms: terms(text) });
+      } catch {}
+    }
+    return items;
+  } catch (err) {
+    if (err?.code === 'ENOENT') return [];
+    throw err;
+  }
+}
+
+export async function retrieveExperiences(query, { experienceFile = DEFAULT_EXPERIENCE_FILE, topK = 4, maxChars = 2800 } = {}) {
+  let items;
+  try { items = await loadExperiences(experienceFile); }
+  catch (err) { return { text: '', sources: [], count: 0, error: String(err?.message || err) }; }
+  const q = terms(query);
+  if (!q.length || !items.length) return { text: '', sources: [], count: items.length };
+  const scored = items.map((item) => {
+    const set = new Set(item.terms); let score = 0;
+    for (const t of q) if (set.has(t)) score += t.length >= 8 ? 3 : 1;
+    if (item.kind === 'owner_feedback') score += 1;
+    return { ...item, score };
+  }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score || String(b.at).localeCompare(String(a.at)));
+  const chosen = []; let used = 0;
+  for (const item of scored) {
+    const rendered = `[experience:${item.kind}:${item.at}]\nsummary=${item.summary}${item.evidence ? `\nevidence=${item.evidence}` : ''}${item.result ? `\nresult=${item.result}` : ''}${item.decision ? `\ndecision=${item.decision}` : ''}${item.lesson ? `\nlesson=${item.lesson}` : ''}`;
+    if (chosen.length && used + rendered.length > maxChars) continue;
+    chosen.push({ ...item, rendered }); used += rendered.length;
+    if (chosen.length >= topK || used >= maxChars) break;
+  }
+  return { text: chosen.map((x) => x.rendered).join('\n\n'), sources: chosen.map((x) => `experience:${x.kind}`), count: items.length };
+}
+
+export async function experienceStatus(experienceFile = DEFAULT_EXPERIENCE_FILE) {
+  try { const items = await loadExperiences(experienceFile); return { ok: true, count: items.length, kinds: Object.fromEntries([...EXPERIENCE_KINDS].map((k) => [k, items.filter((x) => x.kind === k).length])) }; }
+  catch (err) { return { ok: false, count: 0, error: String(err?.message || err) }; }
+}
+
 export async function knowledgeStatus(knowledgeDir = DEFAULT_KNOWLEDGE_DIR) {
   try {
     const db = await loadKnowledge(knowledgeDir);
@@ -109,7 +187,10 @@ export async function askBrain({ task, context = {}, mode = 'operator', fetchImp
   const cleanTask = String(task || '').trim().slice(0, 3000);
   if (!cleanTask) throw new Error('task_required');
   const runtimeContext = contextText(context);
-  const memory = await retrieveKnowledge(`${cleanTask}\n${runtimeContext}`, { knowledgeDir });
+  const [memory, experience] = await Promise.all([
+    retrieveKnowledge(`${cleanTask}\n${runtimeContext}`, { knowledgeDir }),
+    retrieveExperiences(`${cleanTask}\n${runtimeContext}`),
+  ]);
   const base = validateLoopbackUrl(ollamaUrl);
   const endpoint = new URL('/api/chat', base);
   const response = await fetchImpl(endpoint, {
@@ -119,7 +200,7 @@ export async function askBrain({ task, context = {}, mode = 'operator', fetchImp
       options: { num_predict: cleanMode === 'media' ? 180 : 220, temperature: cleanMode === 'sales' ? 0.35 : 0.2, num_ctx: 4096 },
       messages: [
         { role: 'system', content: systemPrompt(cleanMode) },
-        { role: 'user', content: `TASK:\n${cleanTask}\n\nPERSISTENT OSA MEMORY (may be stale; runtime evidence wins):\n${memory.text || '(no relevant memory retrieved)'}\n\nVERIFIED/RUNTIME CONTEXT:\n${runtimeContext}` },
+        { role: 'user', content: `TASK:\n${cleanTask}\n\nPERSISTENT OSA MEMORY (may be stale; runtime evidence wins):\n${memory.text || '(no relevant memory retrieved)'}\n\nVERIFIED EXPERIENCE MEMORY (outcomes/owner feedback; never secrets):\n${experience.text || '(no relevant experience retrieved)'}\n\nVERIFIED/RUNTIME CONTEXT:\n${runtimeContext}` },
       ],
     }),
   });
@@ -127,7 +208,7 @@ export async function askBrain({ task, context = {}, mode = 'operator', fetchImp
   const payload = await response.json();
   const text = String(payload?.message?.content || '').trim();
   if (!text) throw new Error('empty_model_response');
-  return { text, model, mode: cleanMode, memory_sources: memory.sources || [] };
+  return { text, model, mode: cleanMode, memory_sources: memory.sources || [], experience_sources: experience.sources || [] };
 }
 
 async function ollamaHealth(fetchImpl = fetch, ollamaUrl = DEFAULT_OLLAMA_URL) {
@@ -157,9 +238,9 @@ export function createBrainServer({ bind = DEFAULT_BIND, port = DEFAULT_PORT } =
   return http.createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json; charset=utf-8');
     if (req.method === 'GET' && req.url === '/health') {
-      const [health, memory] = await Promise.all([ollamaHealth(), knowledgeStatus()]);
+      const [health, memory, experience] = await Promise.all([ollamaHealth(), knowledgeStatus(), experienceStatus()]);
       res.statusCode = health.ok && health.modelPresent && memory.ok ? 200 : 503;
-      res.end(JSON.stringify({ ok: res.statusCode === 200, service: 'osa-brain', model: DEFAULT_MODEL, ollama: health, memory })); return;
+      res.end(JSON.stringify({ ok: res.statusCode === 200, service: 'osa-brain', model: DEFAULT_MODEL, ollama: health, memory, experience })); return;
     }
     if (req.method === 'POST' && req.url === '/v1/think') {
       if (busy) { res.statusCode = 429; res.end(JSON.stringify({ ok: false, error: 'brain_busy' })); return; }

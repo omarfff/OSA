@@ -70,3 +70,31 @@ test('brain installer restarts an already-running service after updating runtime
   const installer = fs.readFileSync('ops/install-brain.sh', 'utf8');
   assert.match(installer, /systemctl restart osa-brain\.service/);
 });
+
+test('experience memory records and retrieves verified owner feedback', async () => {
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const fsp = await import('node:fs/promises');
+  const { appendExperience, retrieveExperiences, experienceStatus, normalizeExperience } = await import('../tools/osa-brain.mjs');
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'osa-exp-'));
+  const file = path.join(dir, 'experiences.jsonl');
+  await appendExperience({ kind: 'owner_feedback', summary: 'Prefer execution over manual website steps', evidence: 'Owner explicitly requested autonomous execution', lesson: 'Use connected tools first', tags: ['autonomy','owner'] }, { experienceFile: file });
+  const got = await retrieveExperiences('autonomy execution website', { experienceFile: file });
+  assert.match(got.text, /Prefer execution over manual website steps/);
+  assert.equal((await experienceStatus(file)).count, 1);
+  assert.throws(() => normalizeExperience({ kind: 'owner_feedback', summary: 'key sk-abcdefghijklmnop' }), /sensitive_material_rejected/);
+});
+
+test('brain installer deploys experience ledger and learning CLI', () => {
+  const install = fs.readFileSync('ops/install-brain.sh', 'utf8');
+  assert.match(install, /experiences\.jsonl/);
+  assert.match(install, /osa-brain-learn\.mjs/);
+  assert.match(install, /OSA_BRAIN_EXPERIENCE_FILE/);
+});
+
+test('watchdog writes only verified remediation events into experience memory', () => {
+  const watchdog = fs.readFileSync('tools/autopilot-watchdog.mjs', 'utf8');
+  assert.match(watchdog, /runtime_lesson/);
+  assert.match(watchdog, /report\.actions\.length/);
+  assert.match(watchdog, /EXPERIENCE_FILE/);
+});
