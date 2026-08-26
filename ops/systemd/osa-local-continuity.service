@@ -1,0 +1,22 @@
+[Unit]
+Description=OSA Local AI Continuity Worker
+After=network-online.target osa-brain.service
+Wants=network-online.target
+Requires=osa-brain.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/node /usr/local/lib/osa/local-continuity.mjs
+Environment=OSA_CONTINUITY_STATE=/var/lib/osa-continuity
+Environment=OSA_AUTOPILOT_STATUS=/var/lib/osa-autopilot/status.json
+Environment=OSA_BRAIN_URL=http://127.0.0.1:8787
+Environment=OSA_SUPERTEAM_CLI=/opt/osa-superteam/superteam-agent.py
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/osa-continuity
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
