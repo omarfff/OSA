@@ -1,0 +1,12 @@
+[Unit]
+Description=Run OSA Local AI Continuity Worker every 15 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+AccuracySec=45s
+Persistent=true
+Unit=osa-local-continuity.service
+
+[Install]
+WantedBy=timers.target
