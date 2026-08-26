@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveX402Config } from "../src/x402.js";
+import { resolveX402Config, X402_PROTECTED_ROUTES } from "../src/x402.js";
 
 const evmAddress = "0x1111111111111111111111111111111111111111";
 
 test("x402 remains disabled without a receiving address", () => {
   assert.equal(resolveX402Config({}), null);
+  assert.deepEqual(X402_PROTECTED_ROUTES, ['GET /best', 'GET /route', 'GET /score']);
 });
 
 test("x402 testnet defaults are explicit and valid", () => {

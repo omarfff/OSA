@@ -7,6 +7,7 @@ OSA is a machine-commerce trust and procurement system for evaluating agent/API 
 OSA combines live endpoint verification with historical evidence and produces a TrustScore plus confidence and reason codes.
 
 - `GET /best` — rank matching endpoints by trust, intent and optional max price.
+- `GET /route` — return the best endpoint plus a deterministic Arbitrum decision receipt.
 - `GET /score` — live-verify a registered endpoint.
 - `GET /history` — return historical snapshots.
 - `POST /ingest` — authenticated registry ingestion.
@@ -14,6 +15,34 @@ OSA combines live endpoint verification with historical evidence and produces a 
 - `/.well-known/osa.json` — machine-readable product metadata.
 
 TrustScore currently considers uptime, latency, price stability, schema stability, payment stability and transaction evidence. Confidence is reported separately.
+
+## Arbitrum decision receipts
+
+`GET /route` turns an OSA routing result into a privacy-preserving commitment that can be anchored on Arbitrum. The response includes:
+
+- the selected endpoint, alternatives, TrustScore, confidence and reason codes;
+- canonical offchain evidence plus its `keccak256` hash;
+- a chain-bound `decisionId` for Arbitrum Sepolia or Arbitrum One;
+- calldata for `OSARouteRegistry.recordRouteReceipt`.
+
+The Solidity registry stores hashes and bounded scores, not full endpoint evidence. Each reporter receives a distinct `receiptId`, which prevents another address from taking credit for the reporter's receipt. The contract holds no funds, has no owner and exposes no administrative write path.
+
+```bash
+npm run contract:compile
+npm test
+npm run chaos
+```
+
+The deployment and recording scripts are deliberately limited to Arbitrum Sepolia. They require local environment variables and never print a private key:
+
+```bash
+ARBITRUM_RPC_URL="https://your-arbitrum-sepolia-rpc" npm run arbitrum:deploy
+OSA_ARBITRUM_REGISTRY="0x..." OSA_ROUTE_URL="http://127.0.0.1:4021/route?intent=weather" npm run arbitrum:record
+```
+
+Set `ARBITRUM_DEPLOYER_PRIVATE_KEY` only in the local execution environment. Both transaction scripts also require the explicit one-run authorization `ARBITRUM_CONFIRM_TESTNET_TX=YES`. Never commit the key, paste it into an issue, or send it in chat. Testnet transactions are technical evidence, not revenue.
+
+Buildathon materials are in [`hackathon/ARBITRUM_OPEN_HOUSE_SINGAPORE.md`](hackathon/ARBITRUM_OPEN_HOUSE_SINGAPORE.md) and [`hackathon/DEMO.md`](hackathon/DEMO.md).
 
 ## Architecture
 

@@ -4,6 +4,7 @@ import { normalizeEndpoint, calculateTrustScore, liveVerify } from "./core.js";
 import { addSnapshot, historyFor, latestSnapshot, listEndpoints, storeMode, upsertEndpoint } from "./store.js";
 import { buildPaymentMiddleware } from "./x402.js";
 import { paymentOptions } from "./payment-options.js";
+import { buildArbitrumRouteReceipt } from "./arbitrum.js";
 
 const app = express();
 // The Oracle is only exposed behind an internal reverse proxy. Trust one proxy hop
@@ -72,7 +73,7 @@ async function scoreWithBudget(candidates) {
   return scored.filter(Boolean);
 }
 
-app.get("/health", (_req, res) => res.json({ ok: true, service: "OSA Agent Trust Oracle", version: "0.3.1", x402: Boolean(process.env.OSA_PAY_TO), secureFetch: true, storage: storeMode() }));
+app.get("/health", (_req, res) => res.json({ ok: true, service: "OSA Agent Trust Oracle", version: "0.4.0", x402: Boolean(process.env.OSA_PAY_TO), secureFetch: true, storage: storeMode(), arbitrumReceipts: true }));
 
 app.get("/payment-options", (_req, res) => res.json(paymentOptions()));
 
@@ -124,25 +125,29 @@ app.get("/history", async (req, res) => {
   res.json({ endpointId: req.query.id, snapshots: await historyFor(req.query.id, limit) });
 });
 
-app.get("/best", async (req, res) => {
-  const intent = String(req.query.intent || "").toLowerCase();
+function rankingFilters(query) {
+  const intent = String(query.intent || "").toLowerCase();
   let maxPrice = Infinity;
-  if (req.query.max_price !== undefined) {
-    maxPrice = Number(req.query.max_price);
-    if (!Number.isFinite(maxPrice) || maxPrice < 0) return res.status(400).json({ error: "max_price must be a finite non-negative number" });
+  if (query.max_price !== undefined) {
+    maxPrice = Number(query.max_price);
+    if (!Number.isFinite(maxPrice) || maxPrice < 0) return { error: "max_price must be a finite non-negative number" };
   }
+  return { intent, maxPrice };
+}
+
+async function rankMatchingEndpoints({ intent, maxPrice }) {
   const matching = (await listEndpoints()).filter((x) => {
     const intentOk = !intent || (x.intents || []).some((i) => String(i).toLowerCase().includes(intent)) || String(x.description || "").toLowerCase().includes(intent);
     const priceOk = x.priceUsd === null || x.priceUsd === undefined || x.priceUsd <= maxPrice;
     return intentOk && priceOk;
   });
   const candidates = matching.slice(0, maxCandidates);
-  if (!candidates.length) return res.status(404).json({ error: "no matching endpoints" });
+  if (!candidates.length) return { status: 404, error: "no matching endpoints" };
   const scored = await scoreWithBudget(candidates);
-  if (!scored.length) return res.status(504).json({ error: 'verification deadline exceeded' });
+  if (!scored.length) return { status: 504, error: 'verification deadline exceeded' };
   scored.sort((a, b) => b.score - a.score || b.confidence - a.confidence);
   const [best, ...rest] = scored;
-  res.json({
+  return {
     endpoint: best.endpoint,
     score: best.score,
     confidence: best.confidence,
@@ -153,17 +158,37 @@ app.get("/best", async (req, res) => {
     totalCandidates: matching.length,
     truncated: matching.length > candidates.length,
     alternatives: rest.slice(0, 5).map((x) => ({ endpoint: x.endpoint, score: x.score, confidence: x.confidence, reasonCodes: x.reasonCodes }))
+  };
+}
+
+app.get("/best", async (req, res) => {
+  const filters = rankingFilters(req.query);
+  if (filters.error) return res.status(400).json({ error: filters.error });
+  const ranking = await rankMatchingEndpoints(filters);
+  if (ranking.error) return res.status(ranking.status).json({ error: ranking.error });
+  res.json(ranking);
+});
+
+app.get("/route", async (req, res) => {
+  const filters = rankingFilters(req.query);
+  if (filters.error) return res.status(400).json({ error: filters.error });
+  const ranking = await rankMatchingEndpoints(filters);
+  if (ranking.error) return res.status(ranking.status).json({ error: ranking.error });
+  res.json({
+    ...ranking,
+    arbitrum: buildArbitrumRouteReceipt(ranking, filters)
   });
 });
 
 app.get("/.well-known/osa.json", (_req, res) => res.json({
   name: "OSA Agent Trust Oracle",
-  version: "0.3.1",
+  version: "0.4.0",
   description: "Pre-purchase trust scoring and live verification for agent/API endpoints.",
-  endpoints: ["GET /best", "GET /score", "GET /history", "GET /payment-options", "POST /ingest", "POST /sources/mcp", "POST /sources/bazaar"],
+  endpoints: ["GET /best", "GET /route", "GET /score", "GET /history", "GET /payment-options", "POST /ingest", "POST /sources/mcp", "POST /sources/bazaar"],
   security: { ssrfProtection: true, ingestAuthentication: true, responseByteLimit: true, boundedConcurrency: true },
   x402: { enabled: Boolean(process.env.OSA_PAY_TO), network: process.env.OSA_NETWORK || "eip155:84532", currency: "USDC" },
-  output: ["endpoint", "score", "confidence", "alternatives", "reasonCodes"]
+  arbitrum: { receiptSchema: "osa.route.v1", defaultNetwork: "eip155:421614", registryAddress: process.env.OSA_ARBITRUM_REGISTRY || null },
+  output: ["endpoint", "score", "confidence", "alternatives", "reasonCodes", "arbitrum.decisionId", "arbitrum.evidenceHash"]
 }));
 
 app.use((error, _req, res, _next) => {

@@ -1,6 +1,6 @@
 {
   "name": "osa-agent-trust-oracle",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "OSA Agent Trust Oracle: rank and verify agent/API endpoints before purchase.",
@@ -8,6 +8,9 @@
     "start": "node src/server.js",
     "test": "node --test",
     "chaos": "node scripts/chaos.mjs",
+    "contract:compile": "node scripts/arbitrum-compile.mjs",
+    "arbitrum:deploy": "node scripts/arbitrum-deploy.mjs",
+    "arbitrum:record": "node scripts/arbitrum-record.mjs",
     "lead:audit": "node tools/lead-leakage-audit.mjs"
   },
   "engines": {
@@ -18,6 +21,10 @@
     "@x402/evm": "^2.10.0",
     "@x402/express": "^2.10.0",
     "@x402/extensions": "^2.10.0",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "viem": "2.55.19"
+  },
+  "devDependencies": {
+    "solc": "0.8.36"
   }
 }

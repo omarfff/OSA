@@ -5,6 +5,8 @@ import { once } from 'node:events';
 process.env.VERCEL = '1';
 process.env.OSA_INGEST_KEY = 'test-key';
 delete process.env.OSA_PAY_TO;
+delete process.env.OSA_ARBITRUM_REGISTRY;
+delete process.env.OSA_ARBITRUM_REPORTER;
 const { default: app } = await import('../src/server.js');
 const server = app.listen(0, '127.0.0.1');
 await once(server, 'listening');
@@ -27,6 +29,22 @@ test('rejects invalid history limit and max price', async () => {
   assert.equal((await fetch(`${base}/history?id=x&limit=501`)).status, 400);
   assert.equal((await fetch(`${base}/best?max_price=abc`)).status, 400);
   assert.equal((await fetch(`${base}/best?max_price=-1`)).status, 400);
+  assert.equal((await fetch(`${base}/route?max_price=abc`)).status, 400);
+});
+
+test('route endpoint fails closed when the trusted registry has no match', async () => {
+  const response = await fetch(`${base}/route?intent=definitely-not-registered`);
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: 'no matching endpoints' });
+});
+
+test('discovery advertises Arbitrum decision receipts', async () => {
+  const response = await fetch(`${base}/.well-known/osa.json`);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.endpoints.includes('GET /route'), true);
+  assert.equal(body.arbitrum.receiptSchema, 'osa.route.v1');
+  assert.equal(body.arbitrum.defaultNetwork, 'eip155:421614');
 });
 
 test('payment options expose public receive rails without secrets', async () => {

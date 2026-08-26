@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { calculateTrustScore, inferSchemaSignature, isPublicIpAddress, normalizeEndpoint } from '../src/core.js';
+import { buildArbitrumRouteReceipt } from '../src/arbitrum.js';
 
 let seed = Number(process.env.OSA_CHAOS_SEED || 0x5a17c0de) >>> 0;
 function rnd() {
@@ -67,4 +68,37 @@ for (let i = 0; i < 2000; i += 1) {
   for (const ip of privateIps) assert.equal(isPublicIpAddress(ip), false, ip);
 }
 
-console.log(JSON.stringify({ ok: true, iterations: 7000, seed }));
+const decisions = new Set();
+for (let i = 0; i < 500; i += 1) {
+  const score = int(101);
+  const confidence = int(101);
+  const receipt = buildArbitrumRouteReceipt({
+    endpoint: {
+      id: `chaos-${i}`,
+      url: `https://example.com/api/${i}`,
+      method: pick(['GET', 'HEAD']),
+      priceUsd: rnd() * 5
+    },
+    score,
+    confidence,
+    reasonCodes: pick([['STABLE'], ['HIGH_LATENCY'], ['LOW_TRANSACTION_EVIDENCE']]),
+    live: {
+      checkedAt: new Date(1_700_000_000_000 + i * 1000).toISOString(),
+      ok: rnd() > .2,
+      status: pick([200, 204, 402, 500]),
+      latencyMs: int(10_000),
+      schemaSignature: `schema-${int(100)}`,
+      paymentSignature: `payment-${int(10)}`,
+      transactionEvidence: int(1000)
+    },
+    evaluated: 1,
+    candidates: 1,
+    totalCandidates: 1,
+    truncated: false
+  }, { chainId: 421614, intent: `intent-${i}` });
+  assert.match(receipt.decisionId, /^0x[0-9a-f]{64}$/);
+  assert.equal(decisions.has(receipt.decisionId), false);
+  decisions.add(receipt.decisionId);
+}
+
+console.log(JSON.stringify({ ok: true, iterations: 7500, routeDecisions: decisions.size, seed }));

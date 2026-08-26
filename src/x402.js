@@ -5,6 +5,7 @@ const TESTNET_NETWORKS = new Set([
   "stellar:testnet",
   "aptos:2"
 ]);
+export const X402_PROTECTED_ROUTES = Object.freeze(['GET /best', 'GET /route', 'GET /score']);
 
 function normalizeUrl(value) {
   return String(value || "").trim().replace(/\/+$/, "");
@@ -86,6 +87,12 @@ export async function buildPaymentMiddleware() {
       description: "Return the highest-trust API/agent endpoint for an intent and optional max price.",
       mimeType: "application/json",
       extensions: { ...discovery("osa_best", "Select the best trusted endpoint") }
+    },
+    "GET /route": {
+      accepts: [{ scheme: "exact", price, network, payTo }],
+      description: "Select the best trusted endpoint and return a verifiable Arbitrum decision receipt.",
+      mimeType: "application/json",
+      extensions: { ...discovery("osa_route", "Select and commit the best trusted endpoint") }
     },
     "GET /score": {
       accepts: [{ scheme: "exact", price, network, payTo }],
