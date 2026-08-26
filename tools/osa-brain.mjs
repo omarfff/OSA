@@ -10,6 +10,7 @@ const DEFAULT_PORT = Number(process.env.OSA_BRAIN_PORT || 8787);
 const DEFAULT_KNOWLEDGE_DIR = process.env.OSA_BRAIN_KNOWLEDGE_DIR || '/usr/local/share/osa-brain/knowledge';
 const DEFAULT_EXPERIENCE_FILE = process.env.OSA_BRAIN_EXPERIENCE_FILE || '/var/lib/osa-brain/experiences.jsonl';
 const MAX_BODY = 64 * 1024;
+const DEFAULT_INFER_TIMEOUT_MS = Math.max(10000, Math.min(Number(process.env.OSA_BRAIN_INFER_TIMEOUT_MS || 120000), 180000));
 const KNOWLEDGE_CHUNK_SIZE = 1200;
 const MODES = new Set(['operator', 'media', 'sales', 'diagnose']);
 let knowledgeCache = { dir: null, chunks: [], files: [], loadedAt: 0 };
@@ -211,7 +212,7 @@ export async function askBrain({ task, context = {}, mode = 'operator', fetchImp
   const grounding = `TASK:\n${cleanTask}\n\nPERSISTENT OSA MEMORY:\n${memory.text || '(none)'}\n\nVERIFIED EXPERIENCE MEMORY:\n${experience.text || '(none)'}\n\nVERIFIED/RUNTIME CONTEXT:\n${runtimeContext}`;
   const infer = async (messages, numPredict = cleanMode === 'media' ? 180 : 220) => {
     const response = await fetchImpl(endpoint, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(60000),
+      method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(DEFAULT_INFER_TIMEOUT_MS),
       body: JSON.stringify({ model, stream: false, think: false, options: { num_predict: numPredict, temperature: cleanMode === 'sales' ? 0.35 : 0.15, num_ctx: 4096 }, messages }),
     });
     if (!response.ok) throw new Error(`ollama_http_${response.status}`);

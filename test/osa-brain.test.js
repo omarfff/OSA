@@ -127,3 +127,10 @@ test('brain installer waits for real HTTP readiness after restart', () => {
   assert.match(install, /127\.0\.0\.1:\$\{PORT\}\/health/);
   assert.match(install, /for _ in \$\(seq 1 30\)/);
 });
+
+test('brain inference timeout is configurable and bounded for local CPU continuity', () => {
+  const source = fs.readFileSync('tools/osa-brain.mjs', 'utf8');
+  assert.match(source, /OSA_BRAIN_INFER_TIMEOUT_MS/);
+  assert.match(source, /Math\.max\(10000, Math\.min/);
+  assert.match(source, /AbortSignal\.timeout\(DEFAULT_INFER_TIMEOUT_MS\)/);
+});

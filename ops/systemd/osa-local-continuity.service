@@ -6,6 +6,7 @@ Requires=osa-brain.service
 
 [Service]
 Type=oneshot
+TimeoutStartSec=180
 User=root
 Group=root
 ExecStart=/usr/bin/node /usr/local/lib/osa/local-continuity.mjs

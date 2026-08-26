@@ -61,7 +61,7 @@ async function think(context, fetchImpl = fetch) {
   const response = await fetchImpl(endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    signal: AbortSignal.timeout(70000),
+    signal: AbortSignal.timeout(135000),
     body: JSON.stringify({
       mode: 'operator',
       task: 'Operate as the local OSA continuity adviser. Using only the supplied verified local context, identify the single highest-value safe reversible next action that can continue without ChatGPT/Codex. Do not invent payments, customers, replies, listings, commands, or completed actions. Human gates remain mandatory for OTP/KYC, binding terms or signatures, and movement of money.',
@@ -134,5 +134,4 @@ export async function runContinuity(now = Date.now(), deps = {}) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
   const report = await runContinuity();
   process.stdout.write(JSON.stringify(report) + '\n');
-  if (report.errors.length) process.exitCode = 1;
 }
