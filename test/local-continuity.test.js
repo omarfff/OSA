@@ -62,3 +62,11 @@ test('installer verifies live Brain and timer state', () => {
   assert.match(install, /systemctl enable --now osa-local-continuity\.timer/);
   assert.match(install, /test -s \/var\/lib\/osa-continuity\/continuity\.json/);
 });
+
+test('continuity tolerates transient Brain busy/error without killing the timer run', () => {
+  const source = fs.readFileSync('tools/local-continuity.mjs', 'utf8');
+  const unit = fs.readFileSync('ops/systemd/osa-local-continuity.service', 'utf8');
+  assert.doesNotMatch(source, /report\.errors\.length.*exitCode/);
+  assert.match(source, /AbortSignal\.timeout\(135000\)/);
+  assert.match(unit, /TimeoutStartSec=180/);
+});
