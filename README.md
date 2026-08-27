@@ -44,6 +44,19 @@ Set `ARBITRUM_DEPLOYER_PRIVATE_KEY` only in the local execution environment. Bot
 
 Buildathon materials are in [`hackathon/ARBITRUM_OPEN_HOUSE_SINGAPORE.md`](hackathon/ARBITRUM_OPEN_HOUSE_SINGAPORE.md) and [`hackathon/DEMO.md`](hackathon/DEMO.md).
 
+## Python LLM gateway reference
+
+[`examples/python_llm_gateway`](examples/python_llm_gateway) is a dependency-free
+reference boundary for hosted or self-hosted LLM providers. It validates messages,
+tools, structured output, and usage data; applies bounded timeouts, retries, and
+ordered fallback; keeps conversational memory bounded; and emits prompt-free
+attempt telemetry. It is a portfolio reference, not a claim of an existing
+customer integration.
+
+```bash
+npm run test:python
+```
+
 ## Architecture
 
 OSA uses a split-plane design:

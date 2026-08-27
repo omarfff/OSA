@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test",
+    "test:python": "python3 -m unittest discover -s examples/python_llm_gateway -p 'test_*.py'",
     "chaos": "node scripts/chaos.mjs",
     "contract:compile": "node scripts/arbitrum-compile.mjs",
     "arbitrum:deploy": "node scripts/arbitrum-deploy.mjs",
