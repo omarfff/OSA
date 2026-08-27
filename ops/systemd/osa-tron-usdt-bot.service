@@ -1,0 +1,21 @@
+[Unit]
+Description=OSA TRON USDT confirmed receipt watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/osa-tron-usdt scan --limit 100
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/osa/secure/wallets/osa-tron-mainnet.address
+ReadWritePaths=/var/lib/osa
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
