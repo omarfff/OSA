@@ -42,6 +42,13 @@ def req(url,payload=None,tries=3,timeout=10):
         except urllib.error.HTTPError as e:
             last=e
             if e.code not in (408,425,429,500,502,503,504):raise VError(f"http_{e.code}")
+            if i+1<tries:
+                delay=6.0 if e.code==429 else .6*(2**i)
+                try:
+                    if e.headers.get("Retry-After"): delay=max(delay,float(e.headers.get("Retry-After")))
+                except Exception: pass
+                time.sleep(delay)
+                continue
         except Exception as e:last=e
         if i+1<tries:time.sleep(.6*(2**i))
     raise VError(f"network_failure:{type(last).__name__}")
@@ -155,7 +162,7 @@ def scan(w=None,limit=50):
 
 def health():
     w=wallet();t=time.monotonic()
-    o=req(f"{BASE}/v1/accounts/{w}/transactions/trc20?only_confirmed=true&limit=1&contract_address={USDT}",tries=2)
+    o=req(f"{BASE}/v1/accounts/{w}?only_confirmed=true",tries=2)
     return {"ok":isinstance(o.get("data",[]),list),"wallet":w,"latency_ms":int((time.monotonic()-t)*1000),"api_key_configured":bool(api_key()),"db":str(DB)}
 
 def recent(n=20):
