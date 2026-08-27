@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=oneshot
 User=root
 ExecStart=/usr/local/bin/osa-tron-usdt scan --limit 100
+ExecStart=/usr/bin/python3 /usr/local/lib/osa/tron_usdt_sync.py
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
