@@ -58,3 +58,11 @@ Optional x402 v2 payment middleware can protect `/best` and `/score`. Payments r
 OSA is one product. Agent Trust Oracle, Procurement Guard, pricing/benchmark intelligence, MCP reliability and payment-rail checks are modules of the same pre-transaction decision system.
 
 Progress means verified external usage, verified payment and repeat usage — not internal test rows, crawler probes, generated dashboards or speculative revenue.
+
+## GitHub bounty worker
+
+`python3 tools/algora_worker.py --once` performs one bounded discovery and AI-triage run for Algora-backed GitHub issues. The systemd timer installed by `ops/install-algora-worker.sh` runs it every 30 minutes on the VPS.
+
+The worker uses GitHub's supported API and official `algora-pbc[bot]` comments; it never scrapes Algora because Algora's published terms prohibit automated access without written consent. GitHub issue state is authoritative. Closed, stale, crowded, low-value, sensitive or unsupported-language work is rejected before OSA Brain sees it. OSA Brain is advisory only and cannot override policy.
+
+This worker does not execute untrusted repository code, open pull requests, connect Stripe, perform KYC or move funds. Those capabilities remain disabled until the required GitHub write identity, payout eligibility, sandboxed code executor, tests and demo evidence are all verified. A bounty, merged PR or pending transfer is not revenue; only settled payout evidence counts.

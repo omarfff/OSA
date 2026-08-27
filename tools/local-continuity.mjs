@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 const execFile = promisify(execFileCb);
 const STATE_DIR = process.env.OSA_CONTINUITY_STATE || '/var/lib/osa-continuity';
 const WATCHDOG_STATUS = process.env.OSA_AUTOPILOT_STATUS || '/var/lib/osa-autopilot/status.json';
+const ALGORA_STATUS = process.env.OSA_ALGORA_STATUS || '/var/lib/osa-algora-worker/latest.json';
 const BRAIN_URL = process.env.OSA_BRAIN_URL || 'http://127.0.0.1:8787';
 const SUPERTEAM_CLI = process.env.OSA_SUPERTEAM_CLI || '/opt/osa-superteam/superteam-agent.py';
 
@@ -34,6 +35,36 @@ export function parseSuperteamOutput(text = '') {
   } catch {
     return { ok: false, current_count: 0, listings: [], error: 'invalid_json' };
   }
+}
+
+export function sanitizeAlgoraReport(value = {}) {
+  const candidates = Array.isArray(value?.candidates) ? value.candidates.slice(0, 10).map((item) => ({
+    issue_url: String(item?.issue_url || '').slice(0, 500),
+    repository: String(item?.repository || '').slice(0, 200),
+    issue_number: Number(item?.issue_number || 0),
+    title: String(item?.title || '').slice(0, 300),
+    amount_usd: item?.amount_usd == null ? null : Number(item.amount_usd),
+    attempts: Number(item?.attempts || 0),
+    score: Number(item?.score || 0),
+    eligible: Boolean(item?.eligible),
+    reasons: Array.isArray(item?.reasons) ? item.reasons.map(String).slice(0, 20) : [],
+  })) : [];
+  return {
+    at: value?.at || null,
+    source_of_truth: value?.source_of_truth === 'GitHub API' ? 'GitHub API' : 'unverified',
+    algora_scraping: Boolean(value?.algora_scraping),
+    totals: {
+      inspected: Number(value?.totals?.inspected || 0),
+      eligible: Number(value?.totals?.eligible || 0),
+      errors: Number(value?.totals?.errors || 0),
+    },
+    candidates,
+    execution: {
+      code_changed: Boolean(value?.execution?.code_changed),
+      pull_request_submitted: Boolean(value?.execution?.pull_request_submitted),
+      payout_received: Boolean(value?.execution?.payout_received),
+    },
+  };
 }
 
 async function readJson(file) {
@@ -83,11 +114,12 @@ async function think(context, fetchImpl = fetch) {
 export async function runContinuity(now = Date.now(), deps = {}) {
   const stateDir = deps.stateDir || STATE_DIR;
   const watchdogPath = deps.watchdogPath || WATCHDOG_STATUS;
+  const algoraPath = deps.algoraPath || ALGORA_STATUS;
   const superteamFn = deps.runSuperteam || runSuperteam;
   const thinkFn = deps.think || think;
 
   await fsp.mkdir(stateDir, { recursive: true, mode: 0o700 });
-  const watchdog = await readJson(watchdogPath);
+  const [watchdog, algoraRaw] = await Promise.all([readJson(watchdogPath), readJson(algoraPath)]);
   const superteam = await superteamFn();
 
   const context = {
@@ -108,6 +140,7 @@ export async function runContinuity(now = Date.now(), deps = {}) {
       listings: Array.isArray(superteam.listings) ? superteam.listings.slice(0, 25) : [],
       error: superteam.error || null,
     },
+    algora: algoraRaw ? sanitizeAlgoraReport(algoraRaw) : { unavailable: true },
   };
 
   const report = {
@@ -115,7 +148,7 @@ export async function runContinuity(now = Date.now(), deps = {}) {
     mode: 'local_continuity',
     codex_required: false,
     brain_advice_is_execution_proof: false,
-    verified_sources: ['watchdog_status', 'superteam_list_live'],
+    verified_sources: ['watchdog_status', 'superteam_list_live', ...(algoraRaw ? ['algora_github_api_report'] : [])],
     context,
     brain: null,
     errors: [],

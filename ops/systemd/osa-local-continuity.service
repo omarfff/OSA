@@ -12,6 +12,7 @@ Group=root
 ExecStart=/usr/bin/node /usr/local/lib/osa/local-continuity.mjs
 Environment=OSA_CONTINUITY_STATE=/var/lib/osa-continuity
 Environment=OSA_AUTOPILOT_STATUS=/var/lib/osa-autopilot/status.json
+Environment=OSA_ALGORA_STATUS=/var/lib/osa-algora-worker/latest.json
 Environment=OSA_BRAIN_URL=http://127.0.0.1:8787
 Environment=OSA_SUPERTEAM_CLI=/opt/osa-superteam/superteam-agent.py
 UMask=0077

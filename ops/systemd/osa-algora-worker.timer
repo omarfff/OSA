@@ -1,0 +1,13 @@
+[Unit]
+Description=Run OSA GitHub bounty discovery every 30 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+RandomizedDelaySec=3min
+AccuracySec=1min
+Persistent=true
+Unit=osa-algora-worker.service
+
+[Install]
+WantedBy=timers.target
