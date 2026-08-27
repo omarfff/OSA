@@ -1,0 +1,12 @@
+[Unit]
+Description=Run OSA Brain Operator every 15 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Persistent=true
+Unit=osa-brain-operator.service
+
+[Install]
+WantedBy=timers.target

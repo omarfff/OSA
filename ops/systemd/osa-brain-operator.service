@@ -1,0 +1,30 @@
+[Unit]
+Description=OSA Local Brain Operator
+After=osa-brain.service osa-autopilot-watchdog.service
+Requires=osa-brain.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/node /usr/local/lib/osa/osa-brain-operator.mjs
+Environment=OSA_BRAIN_URL=http://127.0.0.1:8787
+Environment=OSA_BRAIN_OPERATOR_STATE=/var/lib/osa-brain-operator
+Environment=OSA_AUTOPILOT_STATUS=/var/lib/osa-autopilot/status.json
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadOnlyPaths=/var/lib/osa-autopilot
+ReadWritePaths=/var/lib/osa-brain-operator
+
+[Install]
+WantedBy=multi-user.target
