@@ -66,3 +66,10 @@ Progress means verified external usage, verified payment and repeat usage — no
 The worker uses GitHub's supported API and official `algora-pbc[bot]` comments; it never scrapes Algora because Algora's published terms prohibit automated access without written consent. GitHub issue state is authoritative. Closed, stale, crowded, low-value, sensitive or unsupported-language work is rejected before OSA Brain sees it. OSA Brain is advisory only and cannot override policy.
 
 This worker does not execute untrusted repository code, open pull requests, connect Stripe, perform KYC or move funds. Those capabilities remain disabled until the required GitHub write identity, payout eligibility, sandboxed code executor, tests and demo evidence are all verified. A bounty, merged PR or pending transfer is not revenue; only settled payout evidence counts.
+
+The separate patch worker can prepare eligible JavaScript/TypeScript work using
+the local `qwen2.5-coder:1.5b` model. It limits generated diffs, blocks workflow
+and path changes, and runs repository tests in a network-isolated Docker
+container. It still never claims, pushes, opens a PR or moves money. Install it
+after the model and `node:20-alpine` image exist with
+`sudo bash ops/install-algora-patch-worker.sh`.

@@ -1,0 +1,12 @@
+[Unit]
+Description=Prepare a tested patch after Algora discovery
+
+[Timer]
+OnBootSec=8min
+OnUnitActiveSec=35min
+RandomizedDelaySec=2min
+Persistent=true
+Unit=osa-algora-patch-worker.service
+
+[Install]
+WantedBy=timers.target

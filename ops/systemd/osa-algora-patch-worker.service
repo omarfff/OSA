@@ -1,0 +1,31 @@
+[Unit]
+Description=OSA Algora bounded patch preparation and Docker test worker
+After=network-online.target ollama.service osa-algora-worker.service docker.service
+Requires=ollama.service docker.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=900
+User=root
+Environment=OSA_ALGORA_STATUS=/var/lib/osa-algora-worker/latest.json
+Environment=OSA_ALGORA_PATCH_STATE=/var/lib/osa-algora-patches
+Environment=OSA_ALGORA_CODER_MODEL=qwen2.5-coder:1.5b
+ExecStart=/usr/bin/python3 /usr/local/lib/osa/algora_patch_worker.py
+StateDirectory=osa-algora-patches
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+MemoryMax=1536M
+CPUQuota=75%
