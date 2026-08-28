@@ -1,0 +1,34 @@
+[Unit]
+Description=OSA GitHub App short-lived installation token
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=/etc/osa/github-app.env
+ExecStart=/usr/local/sbin/osa-github-app-token-refresh
+RuntimeDirectory=osa-github-app
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+ReadOnlyPaths=/etc/osa/secrets/github-app-private-key.pem
+ReadWritePaths=/run/osa-github-app
+MemoryMax=128M
+CPUQuota=25%

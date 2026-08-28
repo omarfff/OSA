@@ -525,6 +525,7 @@ def run_once(
     report = {
         "at": now.isoformat(),
         "mode": "github_api_discovery",
+        "github_auth": "github_app_token" if getattr(client, "token", None) else "anonymous",
         "algora_scraping": False,
         "source_of_truth": "GitHub API",
         "query": query,

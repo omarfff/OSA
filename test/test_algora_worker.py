@@ -216,6 +216,7 @@ class RunTests(unittest.TestCase):
             self.assertEqual(report["totals"]["inspected"], 1)
             self.assertEqual(report["totals"]["eligible"], 1)
             self.assertFalse(report["algora_scraping"])
+            self.assertEqual(report["github_auth"], "anonymous")
             self.assertFalse(report["execution"]["code_changed"])
             self.assertFalse(report["execution"]["pull_request_submitted"])
             self.assertFalse(report["execution"]["payout_received"])

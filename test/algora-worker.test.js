@@ -32,3 +32,24 @@ test('Algora installer keeps credentials server-side and verifies a real report'
   assert.match(installer, /test -s \/var\/lib\/osa-algora-worker\/latest\.json/);
   assert.doesNotMatch(installer, /GITHUB_TOKEN=/);
 });
+
+test('GitHub App authentication exposes only short-lived tokens to the worker', () => {
+  const refresh = fs.readFileSync('ops/osa-github-app-token-refresh.sh', 'utf8');
+  const unit = fs.readFileSync('ops/systemd/osa-github-app-token.service', 'utf8');
+  const dropIn = fs.readFileSync(
+    'ops/systemd/osa-algora-worker.service.d/github-app.conf',
+    'utf8',
+  );
+
+  assert.match(refresh, /openssl dgst -sha256 -sign/);
+  assert.match(refresh, /access_tokens/);
+  assert.match(refresh, /OSA_ALGORA_GITHUB_TOKEN/);
+  assert.doesNotMatch(refresh, /BEGIN (RSA )?PRIVATE KEY/);
+  assert.match(unit, /User=root/);
+  assert.match(unit, /NoNewPrivileges=yes/);
+  assert.match(unit, /ProtectSystem=strict/);
+  assert.match(unit, /RuntimeDirectoryPreserve=yes/);
+  assert.match(unit, /CapabilityBoundingSet=/);
+  assert.match(dropIn, /Requires=osa-github-app-token\.service/);
+  assert.match(dropIn, /EnvironmentFile=-\/run\/osa-github-app\/token\.env/);
+});
