@@ -26,7 +26,7 @@ from typing import Any, Iterable
 
 
 UTC = dt.timezone.utc
-DEFAULT_QUERY = "is:issue is:open commenter:algora-pbc[bot]"
+DEFAULT_QUERY = "is:issue is:open commenter:algora-pbc[bot] comments:<25"
 DEFAULT_STATE_DIR = "/var/lib/osa-algora-worker"
 DEFAULT_BRAIN_URL = "http://127.0.0.1:8787"
 BOT_LOGINS = {"algora-pbc", "algora-pbc[bot]"}
