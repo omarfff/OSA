@@ -8,7 +8,7 @@ curl --max-time 3 -fsS http://127.0.0.1:8787/health >/dev/null
 id -u osa-bounty >/dev/null 2>&1 || useradd --system --home /var/lib/osa-algora-worker --shell /usr/sbin/nologin osa-bounty
 install -d -o root -g root -m 0755 /usr/local/lib/osa
 install -d -o root -g osa-bounty -m 0750 /etc/osa-algora
-install -d -o osa-bounty -g osa-bounty -m 0700 /var/lib/osa-algora-worker
+install -d -o osa-bounty -g osa-bounty -m 0750 /var/lib/osa-algora-worker
 install -o root -g root -m 0755 "$ROOT/tools/algora_worker.py" /usr/local/lib/osa/algora_worker.py
 
 if [[ ! -f /etc/osa-algora/worker.env ]]; then

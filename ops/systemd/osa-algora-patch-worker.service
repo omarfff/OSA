@@ -7,6 +7,7 @@ Requires=ollama.service docker.service
 Type=oneshot
 TimeoutStartSec=900
 User=root
+SupplementaryGroups=osa-bounty
 Environment=OSA_ALGORA_STATUS=/var/lib/osa-algora-worker/latest.json
 Environment=OSA_ALGORA_PATCH_STATE=/var/lib/osa-algora-patches
 Environment=OSA_ALGORA_CODER_MODEL=qwen2.5-coder:1.5b

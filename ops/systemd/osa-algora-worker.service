@@ -14,7 +14,7 @@ Environment=OSA_ALGORA_STATE_DIR=/var/lib/osa-algora-worker
 Environment=OSA_BRAIN_URL=http://127.0.0.1:8787
 ExecStart=/usr/bin/python3 /usr/local/lib/osa/algora_worker.py --once
 StateDirectory=osa-algora-worker
-StateDirectoryMode=0700
+StateDirectoryMode=0750
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes

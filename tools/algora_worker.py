@@ -468,7 +468,7 @@ def atomic_json(path: Path, value: Any) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
             handle.write("\n")
-        os.chmod(tmp_name, 0o600)
+        os.chmod(tmp_name, 0o640)
         os.replace(tmp_name, path)
     finally:
         try:

@@ -221,6 +221,7 @@ class RunTests(unittest.TestCase):
             self.assertFalse(report["execution"]["payout_received"])
             saved = json.loads(Path(tmp, "latest.json").read_text())
             self.assertEqual(saved["source_of_truth"], "GitHub API")
+            self.assertEqual(Path(tmp, "latest.json").stat().st_mode & 0o777, 0o640)
             self.assertTrue(Path(tmp, "runs.jsonl").read_text().strip())
 
     def test_unverified_signal_stays_ineligible(self):
