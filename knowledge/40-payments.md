@@ -1,10 +1,12 @@
 # Payment Rails and Financial Controls
-Merchant/business rails under exploration: Dodo Payments, WorldFirst, Telr, YooKassa, Razorpay. Continue non-binding setup autonomously; KYC, identity, bank ownership, tax/legal declarations, binding terms, signature/mandate/custody/funding require owner approval.
+Payment infrastructure exists to collect money from a named payer; it is not an acquisition strategy. While verified external revenue is zero, keep the smallest already-working receive path and freeze parallel payment exploration unless a real payer requests another method or the current method blocks payment.
+
+Merchant/business rails previously explored include Dodo Payments, WorldFirst, Telr, YooKassa and Razorpay. Do not continue setup merely for optionality. Resume a rail only for a named payer/market requirement or a directly blocked checkout. KYC, identity, bank ownership, tax/legal declarations, binding terms, signature/mandate/custody/funding require owner approval.
 
 Private bank-transfer fallback exists. Send beneficiary/bank/IBAN/SWIFT details privately only after authoritative verification; never publish them in pages/logs/issues. Pending transfer is not revenue; count only credited/settled evidence.
 
-x402 is a primary machine-payment candidate. `/best` and `/score` have x402 middleware. It stays disabled without a real receiving address. Mainnet requires explicit production network/facilitator + verified owned receiving address. Never silently promote testnet. Count a paid call only after on-chain transaction proof is reconciled to OSA payment ledger. A previous bug allowing mainnet with a testnet-only default facilitator was fixed fail-closed.
+x402 is an optional machine-payment rail, not a revenue engine. `/best` and `/score` already have x402 middleware. Keep further mainnet/facilitator/chain expansion frozen until a named buyer needs machine payment or a real paid call is blocked. Never silently promote testnet. Count a paid call only after on-chain transaction proof is reconciled to the OSA payment ledger.
 
-Coinbase CDP CLI is installed on VPS, but never assume production wallet credentials unless verified. Never create/expose seed phrases/private keys without owner approval.
+Coinbase CDP CLI may exist on VPS, but production wallet credentials must never be assumed. Never create/expose seed phrases/private keys without owner approval.
 
-LNbits/Lightning is dormant fallback and requires a funded Lightning backend. API key alone is not revenue infrastructure. Do not use No-KYC/P2P off-ramping as OSA standard bank payout. USDT -> exchange/P2P -> bank is not a fully automatic risk-free business payout. Autonomous trading/sniping/MEV/copy-trading/fund movement are not active revenue paths.
+LNbits/Lightning and extra crypto rails remain dormant fallbacks unless demanded by a payer. API keys, wallet addresses, test balances and receive endpoints are not revenue. Autonomous trading/sniping/MEV/copy-trading/fund movement are not active OSA revenue paths.

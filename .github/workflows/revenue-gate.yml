@@ -1,0 +1,24 @@
+name: Revenue Gate
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  revenue-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Enforce revenue-first decision record
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: npm run revenue:gate

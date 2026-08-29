@@ -1,10 +1,9 @@
 # Near-Term Roadmap
-1. Preserve health/evidence integrity and self-heal safe runtime defects without hiding failures.
-2. Convert existing MCP/API reliability prospects into first verified payment before product proliferation.
-3. Continue $249 Lead Recovery only for high-evidence public businesses with small compliant outreach.
-4. Complete one production payment rail. x402 requires verified owned mainnet address + production facilitator + 402 smoke + minimal authorized paid settlement + reconciliation. Merchant/bank rails proceed until a genuine owner-only KYC/legal gate.
-5. After payment, automate fulfillment and pursue repeat/recurring payment before aggressive expansion.
-6. Use Local Brain as private low-cost RAG/copilot, never as source of truth or root agent.
-7. Activate Telegram only when BotFather token exists and monetize only with buyer demand.
-8. Media supports distribution; publishing requires authorized external account/connector.
-9. Commerce intelligence, property recovery and reseller modules remain secondary unless they directly improve time-to-cash/retention.
+1. Hold WIP to one primary revenue path and one backup until first verified external payment.
+2. Exploit existing external prospects/opportunities before adding products or platforms. Measure submissions, replies, qualified conversations, payment requests, payments and fulfillment.
+3. For the current primary path, execute the next revenue action first. Fix only the smallest named technical blocker that prevents that action.
+4. Keep existing payment capability minimal. Do not add or finish a new rail/chain/facilitator unless a named payer requires it or a real payment is blocked.
+5. If the current offer gets no qualified signal after up to 20 targeted real attempts, change message/offer/segment. At 50 attempts without qualified commercial signal, kill or materially reposition it.
+6. After first payment, fulfill manually or semi-manually, capture outcome evidence, then pursue repeat/recurring payment. Automate only repeated paid work or a demonstrated delivery bottleneck.
+7. Local Brain, browser runtime, media, wallets, Telegram, watchdogs and control-plane components remain supporting infrastructure and are frozen from generalized expansion unless directly tied to buyer, delivery, settlement or a safety incident.
+8. Any proposed work that does not pass `knowledge/05-revenue-gate.md` is parked.

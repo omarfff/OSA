@@ -10,7 +10,8 @@
     "chaos": "node scripts/chaos.mjs",
     "lead:audit": "node tools/lead-leakage-audit.mjs",
     "browser:chaos": "node scripts/browser-chaos.mjs",
-    "browser:health": "node tools/osa-browser-runtime.mjs health"
+    "browser:health": "node tools/osa-browser-runtime.mjs health",
+    "revenue:gate": "node tools/revenue-gate.mjs"
   },
   "engines": {
     "node": ">=20"

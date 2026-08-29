@@ -58,3 +58,10 @@ Optional x402 v2 payment middleware can protect `/best` and `/score`. Payments r
 OSA is one product. Agent Trust Oracle, Procurement Guard, pricing/benchmark intelligence, MCP reliability and payment-rail checks are modules of the same pre-transaction decision system.
 
 Progress means verified external usage, verified payment and repeat usage — not internal test rows, crawler probes, generated dashboards or speculative revenue.
+
+
+## Revenue-first gate
+
+Before first verified external payment, OSA keeps one primary revenue path plus one backup and freezes generalized product/infrastructure/payment/browser/autonomy expansion unless it is the minimum fix for a named external blocker or a real safety incident.
+
+Every non-trivial change should carry the decision record defined in `knowledge/05-revenue-gate.md`. Pull requests are checked by the Revenue Gate workflow. The governing distinction is strict: BUILT != VERIFIED != SELLING != PAID.
