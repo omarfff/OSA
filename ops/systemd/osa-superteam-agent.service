@@ -1,0 +1,36 @@
+[Unit]
+Description=OSA Superteam Earn Official Agent Discovery and Brain Triage
+After=network-online.target osa-brain.service
+Wants=network-online.target
+Requires=osa-brain.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=240
+User=osa-superteam
+Group=osa-superteam
+LoadCredential=superteam-agent.env:/etc/osa/secrets/superteam-agent.env
+Environment=OSA_SUPERTEAM_STATE_DIR=/var/lib/osa-superteam-agent
+Environment=OSA_BRAIN_URL=http://127.0.0.1:8787
+ExecStart=/usr/bin/python3 /usr/local/lib/osa/superteam_agent_worker.py --once --credential-file /run/credentials/osa-superteam-agent.service/superteam-agent.env
+StateDirectory=osa-superteam-agent
+StateDirectoryMode=0750
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+MemoryMax=512M
+CPUQuota=50%

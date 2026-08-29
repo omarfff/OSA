@@ -1,0 +1,13 @@
+[Unit]
+Description=Scan official Superteam agent listings every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+RandomizedDelaySec=2min
+AccuracySec=1min
+Persistent=true
+Unit=osa-superteam-agent.service
+
+[Install]
+WantedBy=timers.target

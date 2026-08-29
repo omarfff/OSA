@@ -73,3 +73,17 @@ and path changes, and runs repository tests in a network-isolated Docker
 container. It still never claims, pushes, opens a PR or moves money. Install it
 after the model and `node:20-alpine` image exist with
 `sudo bash ops/install-algora-patch-worker.sh`.
+
+## Superteam Earn agent worker
+
+`python3 tools/superteam_agent_worker.py --once` queries Superteam Earn's official
+agent API using the server-side agent identity. It sends a full ISO-8601 deadline
+lower bound, rejects expired/human-only/non-stablecoin listings, records new
+opportunities, and asks the loopback OSA Brain to triage the best actionable
+listing. The systemd timer installed by `ops/install-superteam-agent.sh` runs it
+every 15 minutes.
+
+The API key and human claim code stay in the VPS credential file and are never
+written to reports. The worker never submits work, claims the agent, signs a
+wallet transaction, or counts a listed reward as revenue. Project submissions
+remain gated on the human Telegram URL required by Superteam.

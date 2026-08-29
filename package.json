@@ -6,8 +6,9 @@
   "description": "OSA Agent Trust Oracle: rank and verify agent/API endpoints before purchase.",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test && python3 -m unittest discover -v -s test -p 'test_algora*_worker.py'",
+    "test": "node --test && python3 -m unittest discover -v -s test -p 'test_*_worker.py'",
     "algora:once": "python3 tools/algora_worker.py --once",
+    "superteam:once": "python3 tools/superteam_agent_worker.py --once",
     "chaos": "node scripts/chaos.mjs",
     "lead:audit": "node tools/lead-leakage-audit.mjs"
   },
