@@ -88,7 +88,13 @@ def read_env_file(path: str | Path) -> dict[str, str]:
     if source.is_symlink() or not source.is_file():
         raise WorkerError("credential_file_must_be_regular")
     mode = stat.S_IMODE(source.stat().st_mode)
-    if mode & 0o077:
+    credential_dir = os.getenv("CREDENTIALS_DIRECTORY")
+    is_systemd_projection = bool(
+        credential_dir
+        and source.parent.resolve() == Path(credential_dir).resolve()
+        and str(source.resolve()).startswith("/run/credentials/")
+    )
+    if mode & 0o022 or (mode & 0o044 and not is_systemd_projection):
         raise WorkerError("credential_file_permissions_too_open")
 
     values: dict[str, str] = {}

@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import urllib.parse
+from unittest import mock
 
 from tools.superteam_agent_worker import (
     AgentCredential,
@@ -73,6 +74,28 @@ class CredentialTests(unittest.TestCase):
             os.chmod(path, 0o644)
             with self.assertRaisesRegex(WorkerError, "permissions_too_open"):
                 load_credential(path)
+
+    def test_accepts_read_only_systemd_credential_projection(self):
+        root = Path("/run/credentials/osa-superteam-test.service")
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            path = root / "superteam-agent.env"
+            path.write_text(
+                "SUPERTEAM_AGENT_NAME=osa-brain\n"
+                "SUPERTEAM_AGENT_ID=id-1\n"
+                "SUPERTEAM_AGENT_USERNAME=osa-brain-1\n"
+                "SUPERTEAM_AGENT_API_KEY=sk_secret\n",
+                encoding="utf-8",
+            )
+            os.chmod(path, 0o444)
+            with mock.patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": str(root)}):
+                credential = load_credential(path)
+            self.assertEqual(credential.username, "osa-brain-1")
+        finally:
+            if (root / "superteam-agent.env").exists():
+                (root / "superteam-agent.env").unlink()
+            if root.exists():
+                root.rmdir()
 
 
 class PolicyTests(unittest.TestCase):
