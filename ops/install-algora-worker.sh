@@ -13,14 +13,14 @@ install -o root -g root -m 0755 "$ROOT/tools/algora_worker.py" /usr/local/lib/os
 
 if [[ ! -f /etc/osa-algora/worker.env ]]; then
   cat >/etc/osa-algora/worker.env <<'ENV'
-OSA_ALGORA_LIMIT=8
+OSA_ALGORA_LIMIT=50
 OSA_ALGORA_MIN_USD=100
 OSA_ALGORA_MAX_ATTEMPTS=5
 OSA_ALGORA_MAX_COMMENTS=80
 OSA_ALGORA_MAX_AGE_DAYS=45
 OSA_ALGORA_MIN_STARS=25
 OSA_ALGORA_ALLOWED_LANGUAGES=Python,JavaScript,TypeScript,Shell,Go,Rust
-OSA_ALGORA_GITHUB_QUERY=is:issue is:open commenter:algora-pbc[bot] comments:<25
+OSA_ALGORA_GITHUB_QUERY=is:issue is:open commenter:algora-pbc[bot] label:"💎 Bounty" -label:"💰 Rewarded" comments:<25
 OSA_BRAIN_URL=http://127.0.0.1:8787
 ENV
 fi

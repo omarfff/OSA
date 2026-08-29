@@ -110,6 +110,26 @@ class SignalTests(unittest.TestCase):
         self.assertFalse(signal.verified)
         self.assertIn("bounty_cancelled", signal.reasons)
 
+    def test_rejects_already_awarded_bounty_even_if_issue_is_open(self):
+        signal = parse_algora_signal(
+            [
+                bot_comment(valid_template()),
+                bot_comment(
+                    "🎉 @alice has been awarded **$250**!",
+                    updated="2026-08-27T11:00:00Z",
+                ),
+            ],
+            7,
+        )
+        self.assertFalse(signal.verified)
+        self.assertIn("bounty_already_awarded", signal.reasons)
+
+    def test_tracks_original_bounty_age_not_later_issue_activity(self):
+        signal = parse_algora_signal(
+            [bot_comment(valid_template(), updated="2026-01-01T00:00:00Z")], 7
+        )
+        self.assertEqual(signal.bounty_created_at, "2026-01-01T00:00:00Z")
+
 
 class PolicyTests(unittest.TestCase):
     def candidate(self, **overrides):
@@ -129,6 +149,7 @@ class PolicyTests(unittest.TestCase):
             demo_required=True,
             payout_window="2-5 days",
             bot_comment_url="https://github.com/acme/tool/issues/7#issuecomment-1",
+            bounty_created_at="2026-08-27T10:00:00Z",
             language="Python",
             stars=500,
             archived=False,
@@ -157,6 +178,7 @@ class PolicyTests(unittest.TestCase):
                 comments_count=200,
                 attempts=20,
                 amount_usd=20,
+                bounty_created_at="2025-01-01T00:00:00Z",
             ),
             Policy(),
             NOW,
@@ -202,6 +224,9 @@ class FakeClient:
     def repository(self, full_name):
         return repo()
 
+    def claim_pull_requests(self, full_name, issue_number):
+        return 0
+
 
 class RunTests(unittest.TestCase):
     def test_run_writes_truthful_report_and_never_claims_execution(self):
@@ -240,6 +265,24 @@ class RunTests(unittest.TestCase):
             )
             self.assertEqual(report["totals"]["eligible"], 0)
             self.assertIn("algora_bot_comment_missing", report["candidates"][0]["reasons"])
+
+    def test_pull_request_claims_are_counted_before_eligibility(self):
+        class CrowdedClaims(FakeClient):
+            def claim_pull_requests(self, full_name, issue_number):
+                return 15
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = run_once(
+                CrowdedClaims([issue()]),
+                Policy(),
+                state_dir=tmp,
+                use_brain=False,
+                now=NOW,
+            )
+            candidate = report["candidates"][0]
+            self.assertEqual(candidate["claim_mentions"], 15)
+            self.assertFalse(candidate["eligible"])
+            self.assertIn("too_many_claims", candidate["reasons"])
 
 
 if __name__ == "__main__":

@@ -26,7 +26,10 @@ from typing import Any, Iterable
 
 
 UTC = dt.timezone.utc
-DEFAULT_QUERY = "is:issue is:open commenter:algora-pbc[bot] comments:<25"
+DEFAULT_QUERY = (
+    'is:issue is:open commenter:algora-pbc[bot] '
+    'label:"💎 Bounty" -label:"💰 Rewarded" comments:<25'
+)
 DEFAULT_STATE_DIR = "/var/lib/osa-algora-worker"
 DEFAULT_BRAIN_URL = "http://127.0.0.1:8787"
 BOT_LOGINS = {"algora-pbc", "algora-pbc[bot]"}
@@ -127,6 +130,7 @@ class AlgoraSignal:
     demo_required: bool
     payout_window: str | None
     bot_comment_url: str | None
+    bounty_created_at: str | None
     reasons: tuple[str, ...]
 
 
@@ -165,19 +169,31 @@ def parse_algora_signal(comments: Iterable[dict[str, Any]], issue_number: int) -
         reasons.append("current_algora_bounty_template_missing")
 
     selected_body = str((selected or {}).get("body") or "")
-    cancelled = bool(re.search(r"\bbounty\s+(?:was\s+)?cancelled\b", selected_body, re.IGNORECASE))
+    all_bot_text = "\n".join(str(row.get("body") or "") for row in bot_rows)
+    cancelled = bool(re.search(r"\bbounty\s+(?:was\s+)?cancelled\b", all_bot_text, re.IGNORECASE))
     if cancelled:
         reasons.append("bounty_cancelled")
 
+    awarded = bool(
+        re.search(
+            r"(?:\bhas\s+been\s+awarded\b|\bawarded\s+\$\s*[0-9]|\bbounty\s+(?:was\s+)?rewarded\b)",
+            all_bot_text,
+            re.IGNORECASE,
+        )
+    )
+    if awarded:
+        reasons.append("bounty_already_awarded")
+
     payout_match = re.search(r"\b(\d+\s*[-–]\s*\d+\s+days)\b", selected_body, re.IGNORECASE)
     return AlgoraSignal(
-        verified=selected is not None and not cancelled,
+        verified=selected is not None and not cancelled and not awarded,
         amount_usd=amount,
         attempts=len(attempts),
         claim_mentions=len(claims),
         demo_required="demo video" in selected_body.lower(),
         payout_window=payout_match.group(1) if payout_match else None,
         bot_comment_url=str((selected or {}).get("html_url") or "") or None,
+        bounty_created_at=str((selected or {}).get("created_at") or "") or None,
         reasons=tuple(reasons),
     )
 
@@ -225,6 +241,7 @@ class Candidate:
     demo_required: bool
     payout_window: str | None
     bot_comment_url: str | None
+    bounty_created_at: str | None
     language: str | None
     stars: int
     archived: bool
@@ -252,7 +269,8 @@ def score_candidate(candidate: Candidate, policy: Policy, now: dt.datetime | Non
     reasons: list[str] = []
     amount = candidate.amount_usd
     language = str(candidate.language or "").lower()
-    age_days = max(0, (now - parse_time(candidate.updated_at)).days)
+    signal_time = candidate.bounty_created_at or candidate.updated_at
+    age_days = max(0, (now - parse_time(signal_time)).days)
     combined = f"{candidate.title}\n{candidate.body}"
     risky = risk_terms(combined)
 
@@ -264,6 +282,8 @@ def score_candidate(candidate: Candidate, policy: Policy, now: dt.datetime | Non
         reasons.append("amount_below_minimum")
     if candidate.attempts > policy.max_attempts:
         reasons.append("too_many_attempts")
+    if candidate.claim_mentions > policy.max_attempts:
+        reasons.append("too_many_claims")
     if candidate.comments_count > policy.max_comments:
         reasons.append("too_many_comments")
     if age_days > policy.max_age_days:
@@ -330,7 +350,7 @@ class GitHubClient:
     def search(self, query: str, limit: int) -> list[dict[str, Any]]:
         data = self.request(
             "/search/issues",
-            {"q": query, "sort": "updated", "order": "desc", "per_page": bounded_int(limit, 8, 1, 20)},
+            {"q": query, "sort": "updated", "order": "desc", "per_page": bounded_int(limit, 20, 1, 100)},
         )
         return list((data or {}).get("items") or [])
 
@@ -360,6 +380,16 @@ class GitHubClient:
             raise WorkerError("invalid_repository_name")
         return self.request(f"/repos/{full_name}")
 
+    def claim_pull_requests(self, full_name: str, issue_number: int) -> int:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", full_name):
+            raise WorkerError("invalid_repository_name")
+        query = f'repo:{full_name} is:pr "/claim #{int(issue_number)}"'
+        data = self.request(
+            "/search/issues",
+            {"q": query, "per_page": 1},
+        )
+        return bounded_int((data or {}).get("total_count"), 0, 0, 100_000)
+
 
 def repository_from_api_url(value: str) -> str:
     match = re.fullmatch(r"https://api\.github\.com/repos/([^/]+/[^/]+)", str(value))
@@ -387,6 +417,7 @@ def build_candidate(issue: dict[str, Any], comments: list[dict[str, Any]], repo:
         demo_required=signal.demo_required,
         payout_window=signal.payout_window,
         bot_comment_url=signal.bot_comment_url,
+        bounty_created_at=signal.bounty_created_at,
         language=str(repo.get("language") or "") or None,
         stars=bounded_int(repo.get("stargazers_count"), 0, 0, 100_000_000),
         archived=bool(repo.get("archived")),
@@ -498,7 +529,7 @@ def run_once(
     candidates: list[Candidate] = []
     errors: list[str] = []
 
-    for issue in client.search(query, bounded_int(limit, 8, 1, 20)):
+    for issue in client.search(query, bounded_int(limit, 20, 1, 100)):
         try:
             if issue.get("pull_request"):
                 continue
@@ -508,6 +539,12 @@ def run_once(
             candidate = build_candidate(issue, comments, repo)
             prior_signal_reasons = list(candidate.reasons)
             score_candidate(candidate, policy, now)
+            if candidate.eligible:
+                candidate.claim_mentions = max(
+                    candidate.claim_mentions,
+                    client.claim_pull_requests(candidate.repository, candidate.issue_number),
+                )
+                score_candidate(candidate, policy, now)
             for reason in prior_signal_reasons:
                 if reason not in candidate.reasons:
                     candidate.reasons.insert(0, reason)
@@ -550,7 +587,7 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--once", action="store_true", help="perform one bounded discovery run")
     result.add_argument("--no-brain", action="store_true", help="skip local OSA Brain advisory triage")
-    result.add_argument("--limit", type=int, default=bounded_int(os.getenv("OSA_ALGORA_LIMIT"), 8, 1, 20))
+    result.add_argument("--limit", type=int, default=bounded_int(os.getenv("OSA_ALGORA_LIMIT"), 20, 1, 100))
     result.add_argument("--query", default=os.getenv("OSA_ALGORA_GITHUB_QUERY", DEFAULT_QUERY))
     result.add_argument("--state-dir", default=os.getenv("OSA_ALGORA_STATE_DIR", DEFAULT_STATE_DIR))
     return result
