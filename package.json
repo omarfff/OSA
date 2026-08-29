@@ -8,7 +8,9 @@
     "start": "node src/server.js",
     "test": "node --test",
     "chaos": "node scripts/chaos.mjs",
-    "lead:audit": "node tools/lead-leakage-audit.mjs"
+    "lead:audit": "node tools/lead-leakage-audit.mjs",
+    "browser:chaos": "node scripts/browser-chaos.mjs",
+    "browser:health": "node tools/osa-browser-runtime.mjs health"
   },
   "engines": {
     "node": ">=20"
