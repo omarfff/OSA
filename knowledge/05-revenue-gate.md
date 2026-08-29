@@ -56,3 +56,6 @@ Every non-trivial task must answer:
 - Risk-Exception: none | security-incident | legal | data-loss | production-outage
 
 If Revenue-Impact is `none` and Risk-Exception is `none`, the task is parked before first verified payment.
+
+## Control-plane enforcement
+While `pre_first_payment=true` in the OSA control plane, VPS tasks using `git_write`, `migrate`, `payment_config`, or `browser_commit` are rejected unless their metadata supplies `revenue_impact`, `external_evidence`, `why_now`, `kill_criteria`, and `risk_exception`. A documented safety exception may pass with external incident/legal/production evidence. This makes the gate active even when work is initiated outside a pull request.
