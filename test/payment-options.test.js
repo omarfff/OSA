@@ -15,3 +15,24 @@ test("Solana receive rail stays hidden until ownership proof exists", () => {
     oldProof===undefined?delete process.env.OSA_SOLANA_OWNERSHIP_PROOF_REF:process.env.OSA_SOLANA_OWNERSHIP_PROOF_REF=oldProof;
   }
 });
+
+
+test("x402 public metadata matches runtime configuration", () => {
+  const keys = ["OSA_PAY_TO","OSA_NETWORK","OSA_FACILITATOR_URL","OSA_PRICE_USD"];
+  const old = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  try {
+    process.env.OSA_PAY_TO = "0x1111111111111111111111111111111111111111";
+    delete process.env.OSA_NETWORK; delete process.env.OSA_FACILITATOR_URL; delete process.env.OSA_PRICE_USD;
+    let o = paymentOptions();
+    assert.equal(o.x402.status, "enabled");
+    assert.equal(o.x402.network, "eip155:84532");
+    assert.equal(o.x402.environment, "testnet");
+    assert.equal(o.preferred.agent.network, "eip155:84532");
+    process.env.OSA_PAY_TO = "   ";
+    o = paymentOptions();
+    assert.equal(o.x402.status, "wallet_ready_facilitator_pending");
+    assert.equal(o.x402.environment, "not_configured");
+  } finally {
+    for (const k of keys) old[k] === undefined ? delete process.env[k] : process.env[k] = old[k];
+  }
+});

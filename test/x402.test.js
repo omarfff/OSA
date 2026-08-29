@@ -44,3 +44,8 @@ test("x402 rejects malformed EVM destinations and non-positive prices", () => {
     /finite positive number/
   );
 });
+
+
+test("x402 ignores whitespace-only receiving addresses", () => {
+  assert.equal(resolveX402Config({ OSA_PAY_TO: "   " }), null);
+});

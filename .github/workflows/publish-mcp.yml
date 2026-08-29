@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
 
       - name: Install pinned mcp-publisher
         env:
@@ -42,4 +44,22 @@ jobs:
         run: ./mcp-publisher login github-oidc
 
       - name: Publish to official MCP Registry
-        run: ./mcp-publisher publish server.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(mktemp)"
+          set +e
+          ./mcp-publisher publish server.json >"$out" 2>&1
+          rc=$?
+          set -e
+          cat "$out"
+          if [ "$rc" -eq 0 ]; then exit 0; fi
+          if grep -Fq 'invalid version: cannot publish duplicate version' "$out"; then
+            if [ "$GITHUB_EVENT_NAME" = "push" ] && git rev-parse "${GITHUB_SHA}^" >/dev/null 2>&1 && git diff --name-only "${GITHUB_SHA}^" "$GITHUB_SHA" -- | grep -Fxq 'server.json'; then
+              echo '::error::server.json changed but its version is already published; bump server.json version.'
+              exit "$rc"
+            fi
+            echo '::notice::This exact MCP version is already published; treating an unchanged-manifest rerun as idempotent success.'
+            exit 0
+          fi
+          exit "$rc"

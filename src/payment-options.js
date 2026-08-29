@@ -1,3 +1,5 @@
+import { resolveX402Config } from "./x402.js";
+
 const DEFAULTS = Object.freeze({
   evm: "0x04e8930d13A6f6A258aA1488eeFa500ca8Cd9ebB",
   tron: "TXzMju2v6QoevWaMkPaSwEuN6HbFibWW7o",
@@ -16,13 +18,16 @@ export function paymentOptions() {
   const solanaState = !solana ? "not_configured" : !solanaOwnershipProofRef ? "ownership_unverified" : "verified_receive";
   const tron = addr("OSA_TRON_RECEIVE_ADDRESS", DEFAULTS.tron);
   const bitcoin = addr("OSA_BITCOIN_RECEIVE_ADDRESS", DEFAULTS.bitcoin);
-  const x402Enabled = Boolean(process.env.OSA_PAY_TO);
+  const x402Config = resolveX402Config(process.env);
+  const x402Enabled = Boolean(x402Config);
+  const x402Network = x402Config?.network || "eip155:8453";
+  const x402Environment = x402Config ? (x402Config.isTestnet ? "testnet" : "mainnet") : "not_configured";
 
   return {
-    version: 1,
+    version: 2,
     preferred: {
       humanStablecoin: { network: "Base", asset: "USDC", address: evm },
-      agent: { protocol: "x402", network: "Base", asset: "USDC", status: x402Enabled ? "enabled" : "wallet_ready_facilitator_pending" },
+      agent: { protocol: "x402", network: x402Network, asset: "USDC", status: x402Enabled ? "enabled" : "wallet_ready_facilitator_pending", environment: x402Environment },
       broadCryptoFallback: { network: "TRON", asset: "USDT", address: tron }
     },
     solana: { status: solanaState, address: solanaState === "verified_receive" ? solana : null },
@@ -43,9 +48,10 @@ export function paymentOptions() {
     },
     x402: {
       status: x402Enabled ? "enabled" : "wallet_ready_facilitator_pending",
-      payTo: x402Enabled ? process.env.OSA_PAY_TO : evm,
-      network: x402Enabled ? process.env.OSA_NETWORK : "eip155:8453",
-      asset: "USDC"
+      payTo: x402Config?.payTo || evm,
+      network: x402Network,
+      asset: "USDC",
+      environment: x402Environment
     },
     safety: {
       networkSpecific: true,

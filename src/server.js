@@ -72,7 +72,10 @@ async function scoreWithBudget(candidates) {
   return scored.filter(Boolean);
 }
 
-app.get("/health", (_req, res) => res.json({ ok: true, service: "OSA Agent Trust Oracle", version: "0.3.1", x402: Boolean(process.env.OSA_PAY_TO), secureFetch: true, storage: storeMode() }));
+app.get("/health", (_req, res) => {
+  const x402 = paymentOptions().x402;
+  res.json({ ok: true, service: "OSA Agent Trust Oracle", version: "0.3.2", x402: x402.status === "enabled", x402Network: x402.network, x402Environment: x402.environment, secureFetch: true, storage: storeMode() });
+});
 
 app.get("/payment-options", (_req, res) => res.json(paymentOptions()));
 
@@ -158,11 +161,11 @@ app.get("/best", async (req, res) => {
 
 app.get("/.well-known/osa.json", (_req, res) => res.json({
   name: "OSA Agent Trust Oracle",
-  version: "0.3.1",
+  version: "0.3.2",
   description: "Pre-purchase trust scoring and live verification for agent/API endpoints.",
   endpoints: ["GET /best", "GET /score", "GET /history", "GET /payment-options", "POST /ingest", "POST /sources/mcp", "POST /sources/bazaar"],
   security: { ssrfProtection: true, ingestAuthentication: true, responseByteLimit: true, boundedConcurrency: true },
-  x402: { enabled: Boolean(process.env.OSA_PAY_TO), network: process.env.OSA_NETWORK || "eip155:84532", currency: "USDC" },
+  x402: (() => { const x = paymentOptions().x402; return { enabled: x.status === "enabled", network: x.network, environment: x.environment, currency: x.asset }; })(),
   output: ["endpoint", "score", "confidence", "alternatives", "reasonCodes"]
 }));
 
