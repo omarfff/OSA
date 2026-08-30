@@ -92,6 +92,14 @@ test('brain installer deploys experience ledger and learning CLI', () => {
   assert.match(install, /OSA_BRAIN_EXPERIENCE_FILE/);
 });
 
+test('brain installer deploys Google Search grounding disabled by default', () => {
+  const install = fs.readFileSync('ops/install-brain.sh', 'utf8');
+  assert.match(install, /google-search-grounding\.mjs/);
+  assert.match(install, /OSA_GOOGLE_SEARCH_ENABLED=false/);
+  assert.match(install, /OSA_GOOGLE_SEARCH_DAILY_LIMIT=100/);
+  assert.doesNotMatch(install, /GEMINI_API_KEY=/);
+});
+
 test('watchdog writes only verified remediation events into experience memory', () => {
   const watchdog = fs.readFileSync('tools/autopilot-watchdog.mjs', 'utf8');
   assert.match(watchdog, /runtime_lesson/);

@@ -10,6 +10,7 @@ chown osa-brain:osa-brain /var/lib/osa-brain/experiences.jsonl
 chmod 0600 /var/lib/osa-brain/experiences.jsonl
 install -d -o root -g root -m 0755 /usr/local/lib/osa
 install -m 0644 "$ROOT/tools/osa-brain.mjs" /usr/local/lib/osa/osa-brain.mjs
+install -m 0644 "$ROOT/tools/google-search-grounding.mjs" /usr/local/lib/osa/google-search-grounding.mjs
 install -m 0644 "$ROOT/tools/osa-brain-learn.mjs" /usr/local/lib/osa/osa-brain-learn.mjs
 install -d -o root -g osa-brain -m 0750 /usr/local/share/osa-brain/knowledge
 rm -f /usr/local/share/osa-brain/knowledge/*.md
@@ -26,6 +27,10 @@ fi
 chown root:osa-brain /etc/osa/brain.env
 grep -q '^OSA_BRAIN_KNOWLEDGE_DIR=' /etc/osa/brain.env || echo 'OSA_BRAIN_KNOWLEDGE_DIR=/usr/local/share/osa-brain/knowledge' >> /etc/osa/brain.env
 grep -q '^OSA_BRAIN_EXPERIENCE_FILE=' /etc/osa/brain.env || echo 'OSA_BRAIN_EXPERIENCE_FILE=/var/lib/osa-brain/experiences.jsonl' >> /etc/osa/brain.env
+grep -q '^OSA_GOOGLE_SEARCH_ENABLED=' /etc/osa/brain.env || echo 'OSA_GOOGLE_SEARCH_ENABLED=false' >> /etc/osa/brain.env
+grep -q '^OSA_GOOGLE_SEARCH_MODEL=' /etc/osa/brain.env || echo 'OSA_GOOGLE_SEARCH_MODEL=gemini-3.5-flash-lite' >> /etc/osa/brain.env
+grep -q '^OSA_GOOGLE_SEARCH_DAILY_LIMIT=' /etc/osa/brain.env || echo 'OSA_GOOGLE_SEARCH_DAILY_LIMIT=100' >> /etc/osa/brain.env
+grep -q '^OSA_GOOGLE_SEARCH_USAGE_FILE=' /etc/osa/brain.env || echo 'OSA_GOOGLE_SEARCH_USAGE_FILE=/var/lib/osa-brain/google-search-usage.json' >> /etc/osa/brain.env
 chmod 0640 /etc/osa/brain.env
 install -m 0644 "$ROOT/ops/systemd/osa-brain.service" /etc/systemd/system/osa-brain.service
 systemctl daemon-reload

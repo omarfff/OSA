@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { googleSearchGrounded, googleSearchStatus } from './google-search-grounding.mjs';
 
 const DEFAULT_MODEL = process.env.OSA_BRAIN_MODEL || 'qwen3.5:0.8b';
 const DEFAULT_OLLAMA_URL = process.env.OSA_OLLAMA_URL || 'http://127.0.0.1:11434';
@@ -261,13 +262,13 @@ function readJsonBody(req) {
 export function createBrainServer({ bind = DEFAULT_BIND, port = DEFAULT_PORT } = {}) {
   if (!['127.0.0.1', '::1', 'localhost'].includes(String(bind).toLowerCase())) throw new Error('brain_bind_must_be_loopback');
   if (!Number.isInteger(Number(port)) || Number(port) < 1 || Number(port) > 65535) throw new Error('invalid_port');
-  let busy = false;
+  let busy = false; let researchBusy = false;
   return http.createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json; charset=utf-8');
     if (req.method === 'GET' && req.url === '/health') {
       const [health, memory, experience] = await Promise.all([ollamaHealth(), knowledgeStatus(), experienceStatus()]);
       res.statusCode = health.ok && health.modelPresent && memory.ok ? 200 : 503;
-      res.end(JSON.stringify({ ok: res.statusCode === 200, service: 'osa-brain', model: DEFAULT_MODEL, ollama: health, memory, experience })); return;
+      res.end(JSON.stringify({ ok: res.statusCode === 200, service: 'osa-brain', model: DEFAULT_MODEL, ollama: health, memory, experience, google_search: googleSearchStatus() })); return;
     }
     if (req.method === 'POST' && req.url === '/v1/think') {
       if (busy) { res.statusCode = 429; res.end(JSON.stringify({ ok: false, error: 'brain_busy' })); return; }
@@ -275,6 +276,14 @@ export function createBrainServer({ bind = DEFAULT_BIND, port = DEFAULT_PORT } =
       try { const body = await readJsonBody(req); const answer = await askBrain({ task: body.task, context: body.context, mode: body.mode }); res.statusCode = 200; res.end(JSON.stringify({ ok: true, ...answer, latency_ms: Date.now() - started })); }
       catch (err) { res.statusCode = Number(err?.statusCode || 500); res.end(JSON.stringify({ ok: false, error: String(err?.message || err) })); }
       finally { busy = false; }
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/v1/research') {
+      if (researchBusy) { res.statusCode = 429; res.end(JSON.stringify({ ok: false, error: 'research_busy' })); return; }
+      researchBusy = true; const started = Date.now();
+      try { const body = await readJsonBody(req); const result = await googleSearchGrounded({ query: body.query }); res.statusCode = 200; res.end(JSON.stringify({ ok: true, ...result, latency_ms: Date.now() - started })); }
+      catch (err) { res.statusCode = Number(err?.statusCode || 500); res.end(JSON.stringify({ ok: false, error: String(err?.message || err) })); }
+      finally { researchBusy = false; }
       return;
     }
     res.statusCode = 404; res.end(JSON.stringify({ ok: false, error: 'not_found' }));
