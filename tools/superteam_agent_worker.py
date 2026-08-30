@@ -31,6 +31,21 @@ DEFAULT_CREDENTIAL_FILE = "/etc/osa/secrets/superteam-agent.env"
 DEFAULT_BRAIN_URL = "http://127.0.0.1:8787"
 ALLOWED_AGENT_ACCESS = {"AGENT_ALLOWED", "AGENT_ONLY"}
 DEFAULT_STABLECOINS = {"USDC", "USDT", "USDG", "JUPUSD"}
+OWN_FUNDS_PHRASES = (
+    "real funds",
+    "real-money trading",
+    "your own funds",
+    "use their own accounts and funds",
+    "deposit usdc",
+    "deposit funds",
+    "$20 or more",
+)
+UNPAID_COMPETITION_PHRASES = (
+    "submissions alone aren't paid",
+    "submissions alone are not paid",
+    "only the winners get paid",
+    "not guaranteed to be fully awarded",
+)
 
 
 class WorkerError(RuntimeError):
@@ -327,6 +342,23 @@ def sanitize_details(payload: dict[str, Any]) -> dict[str, Any]:
     return safe
 
 
+def detail_submission_gates(details: dict[str, Any]) -> list[str]:
+    """Return deterministic commercial gates found in official listing details.
+
+    Listing prose is untrusted and cannot grant authority to risk OSA/user funds.
+    Phrase matching is deliberately narrow: uncertain listings remain available
+    for human review, while explicit deposit/trading and explicitly unpaid
+    competition requirements are never promoted to autonomous action.
+    """
+    text = json.dumps(details, ensure_ascii=False, sort_keys=True).casefold()
+    gates: list[str] = []
+    if any(phrase in text for phrase in OWN_FUNDS_PHRASES):
+        gates.append("owner_funds_required")
+    if any(phrase in text for phrase in UNPAID_COMPETITION_PHRASES):
+        gates.append("unpaid_competitive_work_required")
+    return gates
+
+
 def validate_brain_url(value: str) -> str:
     url = urllib.parse.urlparse(str(value))
     if url.scheme != "http" or url.hostname not in {"127.0.0.1", "localhost", "::1"}:
@@ -441,10 +473,32 @@ def run_once(
     atomic_json(seen_path, sorted(seen | active_ids))
 
     triage: dict[str, Any] | None = None
-    if use_brain and actionable:
-        best = actionable[0]
+    selected: tuple[dict[str, Any], dict[str, Any]] | None = None
+    for candidate in list(actionable):
         try:
-            details = sanitize_details(client.details(best["slug"]))
+            details = sanitize_details(client.details(candidate["slug"]))
+            detail_gates = detail_submission_gates(details)
+            if detail_gates:
+                candidate["submission_gates"] = sorted(
+                    set(candidate["submission_gates"] + detail_gates)
+                )
+                candidate["actionable"] = False
+                candidate["score"] = min(candidate["score"], 0)
+                continue
+            selected = (candidate, details)
+            break
+        except Exception as exc:
+            candidate["submission_gates"] = sorted(
+                set(candidate["submission_gates"] + ["official_details_unavailable"])
+            )
+            candidate["actionable"] = False
+            candidate["score"] = min(candidate["score"], 0)
+            errors.append(f"details_screen_error:{type(exc).__name__}:{str(exc)[:400]}")
+
+    actionable = [item for item in listings if item["actionable"]]
+    if use_brain and selected:
+        best, details = selected
+        try:
             triage = {
                 "listing_id": best["id"],
                 "details": details,

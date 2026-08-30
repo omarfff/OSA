@@ -12,6 +12,7 @@ from tools.superteam_agent_worker import (
     Policy,
     WorkerError,
     build_live_url,
+    detail_submission_gates,
     load_credential,
     normalize_listing,
     run_once,
@@ -132,6 +133,24 @@ class PolicyTests(unittest.TestCase):
         self.assertIsInstance(result["requirements"], str)
         self.assertLessEqual(len(result["requirements"]), 12_001)
 
+    def test_details_gate_explicit_owner_funds(self):
+        gates = detail_submission_gates(
+            {"requirements": "Deposit USDC and test with real funds."}
+        )
+        self.assertIn("owner_funds_required", gates)
+
+    def test_details_gate_explicit_unpaid_competition(self):
+        gates = detail_submission_gates(
+            {"description": "Submissions alone aren't paid; selected calls receive USDG."}
+        )
+        self.assertIn("unpaid_competitive_work_required", gates)
+
+    def test_details_do_not_gate_normal_fixed_work(self):
+        gates = detail_submission_gates(
+            {"description": "Build a tested artifact for a fixed 100 USDC reward."}
+        )
+        self.assertEqual(gates, [])
+
 
 class FakeClient:
     def __init__(self, rows):
@@ -142,6 +161,13 @@ class FakeClient:
 
     def details(self, slug):
         return {"title": "Official title", "description": "Build an original tested artifact."}
+
+
+class RiskyFakeClient(FakeClient):
+    def details(self, slug):
+        if slug == "risky":
+            return {"description": "Deposit USDC and test with real funds."}
+        return super().details(slug)
 
 
 class RunTests(unittest.TestCase):
@@ -177,6 +203,24 @@ class RunTests(unittest.TestCase):
             )
             self.assertEqual(first["totals"]["new"], 1)
             self.assertEqual(second["totals"]["new"], 0)
+
+    def test_risky_top_listing_is_gated_before_brain_selection(self):
+        credential = AgentCredential("osa-brain", "id-1", "osa-brain-1", "sk_secret")
+        risky = listing(id="risky", slug="risky", rewardAmount=900)
+        safe = listing(id="safe", slug="safe", rewardAmount=500)
+        with tempfile.TemporaryDirectory() as tmp:
+            report = run_once(
+                RiskyFakeClient([risky, safe]),
+                credential,
+                Policy(),
+                state_dir=tmp,
+                use_brain=False,
+                now=NOW,
+            )
+            risky_result = next(x for x in report["listings"] if x["id"] == "risky")
+            self.assertFalse(risky_result["actionable"])
+            self.assertIn("owner_funds_required", risky_result["submission_gates"])
+            self.assertEqual(report["totals"]["actionable"], 1)
 
 
 if __name__ == "__main__":
