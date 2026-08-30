@@ -98,6 +98,11 @@ test('brain installer deploys Google Search grounding disabled by default', () =
   assert.match(install, /OSA_GOOGLE_SEARCH_ENABLED=false/);
   assert.match(install, /OSA_GOOGLE_SEARCH_DAILY_LIMIT=100/);
   assert.doesNotMatch(install, /GEMINI_API_KEY=/);
+  assert.match(install, /osa-enable-google-search/);
+  const helper = fs.readFileSync('ops/osa-enable-google-search', 'utf8');
+  assert.match(helper, /read -rsp 'Gemini API key: '/);
+  assert.match(helper, /install -o root -g osa-brain -m 0640/);
+  assert.doesNotMatch(helper, /echo \$GEMINI_KEY/);
 });
 
 test('watchdog writes only verified remediation events into experience memory', () => {

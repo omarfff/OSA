@@ -11,6 +11,7 @@ chmod 0600 /var/lib/osa-brain/experiences.jsonl
 install -d -o root -g root -m 0755 /usr/local/lib/osa
 install -m 0644 "$ROOT/tools/osa-brain.mjs" /usr/local/lib/osa/osa-brain.mjs
 install -m 0644 "$ROOT/tools/google-search-grounding.mjs" /usr/local/lib/osa/google-search-grounding.mjs
+install -o root -g root -m 0755 "$ROOT/ops/osa-enable-google-search" /usr/local/sbin/osa-enable-google-search
 install -m 0644 "$ROOT/tools/osa-brain-learn.mjs" /usr/local/lib/osa/osa-brain-learn.mjs
 install -d -o root -g osa-brain -m 0750 /usr/local/share/osa-brain/knowledge
 rm -f /usr/local/share/osa-brain/knowledge/*.md

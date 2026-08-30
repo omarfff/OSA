@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[ "$(id -u)" -eq 0 ] || { echo 'Run with sudo.' >&2; exit 2; }
+ENV_FILE=/etc/osa/brain.env
+[ -f "$ENV_FILE" ] || { echo 'OSA Brain environment is missing.' >&2; exit 3; }
+
+read -rsp 'Gemini API key: ' GEMINI_KEY
+echo
+if [ "${#GEMINI_KEY}" -lt 20 ] || [[ "$GEMINI_KEY" =~ [[:space:]] ]]; then
+  unset GEMINI_KEY
+  echo 'Invalid key format.' >&2
+  exit 4
+fi
+
+umask 077
+TMP=$(mktemp)
+cleanup() { rm -f "$TMP"; unset GEMINI_KEY; }
+trap cleanup EXIT
+awk '!/^GEMINI_API_KEY=/ && !/^OSA_GOOGLE_SEARCH_ENABLED=/' "$ENV_FILE" > "$TMP"
+printf 'GEMINI_API_KEY=%s\nOSA_GOOGLE_SEARCH_ENABLED=true\n' "$GEMINI_KEY" >> "$TMP"
+install -o root -g osa-brain -m 0640 "$TMP" "$ENV_FILE"
+unset GEMINI_KEY
+systemctl restart osa-brain.service
+
+for _ in $(seq 1 30); do
+  STATUS=$(curl --max-time 2 -fsS http://127.0.0.1:8787/health 2>/dev/null || true)
+  if printf '%s' "$STATUS" | grep -q '"google_search":{"enabled":true,"configured":true'; then
+    echo 'OSA Google Search is configured and enabled.'
+    exit 0
+  fi
+  sleep 0.5
+done
+echo 'OSA Brain restarted, but Google Search readiness was not verified.' >&2
+exit 5
