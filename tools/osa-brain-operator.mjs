@@ -6,6 +6,7 @@ const BRAIN_URL = process.env.OSA_BRAIN_URL || 'http://127.0.0.1:8787';
 const STATE_DIR = process.env.OSA_BRAIN_OPERATOR_STATE || '/var/lib/osa-brain-operator';
 const AUTOPILOT_STATUS = process.env.OSA_AUTOPILOT_STATUS || '/var/lib/osa-autopilot/status.json';
 const MAX_INPUT_BYTES = 64 * 1024;
+const BRAIN_TIMEOUT_MS = 300_000;
 
 export function validateBrainUrl(raw = BRAIN_URL) {
   const url = new URL(String(raw));
@@ -60,7 +61,7 @@ export async function runBrainOperator({ fetchImpl = fetch, now = new Date() } =
   const response = await fetchImpl(new URL('/v1/think', brain), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    signal: AbortSignal.timeout(90000),
+    signal: AbortSignal.timeout(BRAIN_TIMEOUT_MS),
     body: JSON.stringify({
       mode: 'operator',
       task: 'Review the verified OSA runtime state. Produce the single highest-value safe reversible next action toward verified external revenue, followed by the evidence needed to verify completion. Do not invent live leads, payments, defects, or completed actions. Do not request approval unless the action is binding or sensitive.',

@@ -23,3 +23,9 @@ test('brain operator systemd unit is hardened and local', () => {
   assert.match(unit, /ReadWritePaths=\/var\/lib\/osa-brain-operator/);
   assert.doesNotMatch(unit, /\/opt\/osa\/gitops/);
 });
+
+test('brain operator allows slow local inference without an unbounded wait', () => {
+  const source = fs.readFileSync('tools/osa-brain-operator.mjs', 'utf8');
+  assert.match(source, /const BRAIN_TIMEOUT_MS = 300_000;/);
+  assert.match(source, /AbortSignal\.timeout\(BRAIN_TIMEOUT_MS\)/);
+});
