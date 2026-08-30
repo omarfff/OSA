@@ -11,7 +11,7 @@ def run(args,timeout=30):
  return p.stdout,p.stderr
 def clean(v,n=180):
  if v is None:return None
- s=re.sub(r"\s+"," ",str(v)).strip();return s[:n] if s else None
+ s=re.sub(r"\s+"," ",str(v)).strip();s=re.sub(r"\b(his|her)\b","the person\'s",s,flags=re.I);s=re.sub(r"\b(he|she|him|man|woman|male|female|patient|clinician|doctor)\b","person",s,flags=re.I);return s[:n] if s else None
 def normalize(raw):
  obs=raw.get("observations",{}) if isinstance(raw,dict) else {};out={}
  if not isinstance(obs,dict): obs={}
@@ -73,7 +73,7 @@ def duration(video):
  return x
 def frames(video,start,folder):
  files=[]
- for i,off in enumerate((0,1.2),1):
+ for i,off in enumerate((0,.75),1):
   f=str(Path(folder)/f"frame-{i:02}.jpg");run(["ffmpeg","-hide_banner","-loglevel","error","-y","-ss",f"{start+off:.3f}","-i",video,"-frames:v","1","-vf","scale=384:-2","-q:v","4",f],20);files.append(f)
  return files
 def motion_window(video,start):
