@@ -1,0 +1,33 @@
+[Unit]
+Description=OSA Research Mailbox Worker
+After=network-online.target osa-brain.service
+Wants=network-online.target
+Requires=osa-brain.service
+
+[Service]
+Type=simple
+User=osa-brain
+Group=osa-brain
+ExecStart=/usr/bin/node /usr/local/lib/osa/research-mailbox-worker.mjs
+EnvironmentFile=/etc/osa/research-worker.env
+Environment=OSA_RESEARCH_WORKER_TOKEN_FILE=/etc/osa/research-worker.token
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadOnlyPaths=/etc/osa/research-worker.env /etc/osa/research-worker.token
+MemoryMax=256M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
