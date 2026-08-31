@@ -112,21 +112,82 @@ function parseRss(xml, limit = SEARCH_RESULT_LIMIT) {
   return results;
 }
 
+function cleanHtml(value = '') {
+  return decodeXml(value).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function unwrapDuckDuckGoUrl(value = '') {
+  let raw = decodeXml(value).trim();
+  if (raw.startsWith('//')) raw = `https:${raw}`;
+  try {
+    const parsed = new URL(raw);
+    const destination = parsed.hostname.endsWith('duckduckgo.com') ? parsed.searchParams.get('uddg') : null;
+    const finalUrl = new URL(destination || parsed.href);
+    return ['http:', 'https:'].includes(finalUrl.protocol) ? finalUrl.href : null;
+  } catch { return null; }
+}
+
+function parseDuckDuckGo(html, limit = SEARCH_RESULT_LIMIT) {
+  const anchors = [...String(html).matchAll(/<a\b[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+  const seen = new Set(); const results = [];
+  for (let index = 0; index < anchors.length; index += 1) {
+    const match = anchors[index];
+    const title = cleanHtml(match[2]).slice(0, 240);
+    const url = unwrapDuckDuckGoUrl(match[1]);
+    const end = anchors[index + 1]?.index ?? Math.min(String(html).length, Number(match.index) + 4000);
+    const block = String(html).slice(Number(match.index), end);
+    const snippet = block.match(/<(?:a|div)\b[^>]*class=["'][^"']*result__snippet[^"']*["'][^>]*>([\s\S]*?)<\/(?:a|div)>/i);
+    const description = cleanHtml(snippet?.[1] || '').slice(0, 900);
+    if (!title || !url || seen.has(url)) continue;
+    seen.add(url); results.push({ title, url, description });
+    if (results.length >= limit) break;
+  }
+  return results;
+}
+
+const QUERY_STOP_WORDS = new Set([
+  'about', 'and', 'any', 'are', 'current', 'currently', 'distinguish', 'facts', 'find', 'from', 'how', 'information', 'official', 'open', 'paid', 'return', 'search', 'snippets', 'sources', 'the', 'verified', 'whether', 'with',
+  'ابحث', 'اذكر', 'الحالي', 'الحالية', 'الرسمية', 'عن', 'في', 'كيف', 'معلومات', 'مصادر', 'من', 'وهل', 'و',
+]);
+
+function importantTerms(query) {
+  return [...new Set(String(query).toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}._-]{2,}/gu) || [])]
+    .filter((term) => !QUERY_STOP_WORDS.has(term)).slice(0, 14);
+}
+
+function compactSearchQuery(query) {
+  const compact = importantTerms(query).join(' ').slice(0, 300);
+  return compact.length >= 3 ? compact : String(query).slice(0, 300);
+}
+
+function rankResults(results, query) {
+  const terms = importantTerms(query).slice(0, 8);
+  if (!terms.length) return results;
+  const ranked = results.map((result, index) => {
+    const haystack = `${result.title} ${result.url} ${result.description}`.toLowerCase();
+    return { result, index, score: terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0) };
+  });
+  const relevant = ranked.some((entry) => entry.score > 0) ? ranked.filter((entry) => entry.score > 0) : ranked;
+  return relevant.sort((a, b) => b.score - a.score || a.index - b.index).map((entry) => entry.result);
+}
+
 async function webSearchResults(query, fetchImpl, timeoutMs) {
+  const compact = compactSearchQuery(query);
   const searches = [
-    new URL(`https://www.bing.com/search?format=rss&q=${encodeURIComponent(query.slice(0, 500))}`),
-    new URL(`https://news.google.com/rss/search?q=${encodeURIComponent(query.slice(0, 500))}&hl=en-US&gl=US&ceid=US:en`),
+    { kind: 'html', url: new URL(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query.slice(0, 500))}`) },
+    ...(compact !== query.slice(0, 300) ? [{ kind: 'html', url: new URL(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(compact)}`) }] : []),
+    { kind: 'rss', url: new URL(`https://news.google.com/rss/search?q=${encodeURIComponent(compact)}&hl=en-US&gl=US&ceid=US:en`) },
   ];
-  const payloads = await Promise.all(searches.map(async (url) => {
+  const payloads = await Promise.all(searches.map(async ({ kind, url }) => {
     try {
       const response = await fetchImpl(url, {
-        headers: { accept: 'application/rss+xml, application/xml, text/xml', 'user-agent': 'OSA-Brain/1.0 (source-backed research)' },
+        headers: { accept: kind === 'html' ? 'text/html' : 'application/rss+xml, application/xml, text/xml', 'user-agent': 'Mozilla/5.0 (compatible; OSA-Brain/1.0; source-backed research)' },
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!response.ok) return [];
-      const xml = await response.text();
-      if (xml.length > SEARCH_RESPONSE_LIMIT) return [];
-      return parseRss(xml);
+      const body = await response.text();
+      if (body.length > SEARCH_RESPONSE_LIMIT) return [];
+      return kind === 'html' ? parseDuckDuckGo(body) : parseRss(body);
     } catch { return []; }
   }));
   const seen = new Set(); const results = [];
@@ -135,7 +196,7 @@ async function webSearchResults(query, fetchImpl, timeoutMs) {
     seen.add(result.url); results.push(result);
     if (results.length >= SEARCH_RESULT_LIMIT) break;
   }
-  return results;
+  return rankResults(results, query).slice(0, SEARCH_RESULT_LIMIT);
 }
 
 async function searchThenSynthesize({ cleanQuery, model, env, fetchImpl, endpoint, timeoutMs }) {
@@ -166,7 +227,7 @@ async function searchThenSynthesize({ cleanQuery, model, env, fetchImpl, endpoin
     search_queries: [cleanQuery],
     grounded: false,
     source_backed: true,
-    provider: 'web-rss+gemini',
+    provider: 'web-search+gemini',
   };
 }
 

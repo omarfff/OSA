@@ -61,4 +61,4 @@ Progress means verified external usage, verified payment and repeat usage — no
 
 ## OSA Brain research
 
-`POST /v1/research` prefers Gemini Google Search grounding. When Google returns quota exhaustion, the brain can fall back to bounded Bing/Google News RSS results and use Gemini only to synthesize the untrusted snippets with numbered source links. Set `OSA_WEB_SEARCH_FALLBACK_ENABLED=false` to fail closed instead.
+`POST /v1/research` prefers Gemini Google Search grounding. When Google returns quota exhaustion, the brain can fall back to bounded DuckDuckGo/Google News results and use Gemini only to synthesize the untrusted snippets with numbered source links. Set `OSA_WEB_SEARCH_FALLBACK_ENABLED=false` to fail closed instead.
