@@ -58,3 +58,7 @@ Optional x402 v2 payment middleware can protect `/best` and `/score`. Payments r
 OSA is one product. Agent Trust Oracle, Procurement Guard, pricing/benchmark intelligence, MCP reliability and payment-rail checks are modules of the same pre-transaction decision system.
 
 Progress means verified external usage, verified payment and repeat usage — not internal test rows, crawler probes, generated dashboards or speculative revenue.
+
+## OSA Brain research
+
+`POST /v1/research` prefers Gemini Google Search grounding. When Google returns quota exhaustion, the brain can fall back to bounded Bing/Google News RSS results and use Gemini only to synthesize the untrusted snippets with numbered source links. Set `OSA_WEB_SEARCH_FALLBACK_ENABLED=false` to fail closed instead.

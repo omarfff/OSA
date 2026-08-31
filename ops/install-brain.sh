@@ -29,6 +29,7 @@ chown root:osa-brain /etc/osa/brain.env
 grep -q '^OSA_BRAIN_KNOWLEDGE_DIR=' /etc/osa/brain.env || echo 'OSA_BRAIN_KNOWLEDGE_DIR=/usr/local/share/osa-brain/knowledge' >> /etc/osa/brain.env
 grep -q '^OSA_BRAIN_EXPERIENCE_FILE=' /etc/osa/brain.env || echo 'OSA_BRAIN_EXPERIENCE_FILE=/var/lib/osa-brain/experiences.jsonl' >> /etc/osa/brain.env
 grep -q '^OSA_GOOGLE_SEARCH_ENABLED=' /etc/osa/brain.env || echo 'OSA_GOOGLE_SEARCH_ENABLED=false' >> /etc/osa/brain.env
+grep -q '^OSA_WEB_SEARCH_FALLBACK_ENABLED=' /etc/osa/brain.env || echo 'OSA_WEB_SEARCH_FALLBACK_ENABLED=true' >> /etc/osa/brain.env
 grep -q '^OSA_GOOGLE_SEARCH_MODEL=' /etc/osa/brain.env || echo 'OSA_GOOGLE_SEARCH_MODEL=gemini-3.5-flash-lite' >> /etc/osa/brain.env
 grep -q '^OSA_GOOGLE_SEARCH_DAILY_LIMIT=' /etc/osa/brain.env || echo 'OSA_GOOGLE_SEARCH_DAILY_LIMIT=100' >> /etc/osa/brain.env
 grep -q '^OSA_GOOGLE_SEARCH_USAGE_FILE=' /etc/osa/brain.env || echo 'OSA_GOOGLE_SEARCH_USAGE_FILE=/var/lib/osa-brain/google-search-usage.json' >> /etc/osa/brain.env

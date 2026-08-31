@@ -96,6 +96,7 @@ test('brain installer deploys Google Search grounding disabled by default', () =
   const install = fs.readFileSync('ops/install-brain.sh', 'utf8');
   assert.match(install, /google-search-grounding\.mjs/);
   assert.match(install, /OSA_GOOGLE_SEARCH_ENABLED=false/);
+  assert.match(install, /OSA_WEB_SEARCH_FALLBACK_ENABLED=true/);
   assert.match(install, /OSA_GOOGLE_SEARCH_DAILY_LIMIT=100/);
   assert.doesNotMatch(install, /GEMINI_API_KEY=/);
   assert.match(install, /osa-enable-google-search/);
