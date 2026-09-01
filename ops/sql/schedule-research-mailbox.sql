@@ -51,7 +51,7 @@ begin
   where s.active;
 
   v_query := format(
-    'Search as of %s for individual-accessible paid programming or AI bounties that are verifiably open now. Inspect this exact locked list without adding, removing, renaming, or replacing entries:\n%s\nFor every candidate, cross-check the reward platform against the canonical GitHub issue state and maintainer eligibility instructions. Reject closed issues, already-rewarded work, repositories without a specific funded issue, tasks that prohibit community PRs, points, testnets, airdrops, contests without a currently open task, and anything requiring upfront payment. Require the exact task title, amount and currency, deadline if one exists, requirements, official direct task URL, and evidence that work can still be claimed. If no task meets every requirement, say: No sufficiently verified task found today.',
+    'Search as of %s for individual-accessible paid programming or AI bounties that are verifiably open now. Inspect this exact locked list without adding, removing, renaming, or replacing entries:\n%s\nFor every candidate, cross-check the reward platform against the canonical GitHub issue state and maintainer eligibility instructions. Reject closed issues, already-rewarded work, repositories without a specific funded issue, tasks that prohibit community PRs, points, testnets, airdrops, contests without a currently open task, and anything requiring upfront payment. Require the exact task title, amount and currency, requirements, official direct task URL, and evidence that work can still be claimed. Report a deadline when the official source provides one; absence of a deadline alone is not grounds for rejection when both the canonical issue and reward listing are live. If no task meets every requirement, say: No sufficiently verified task found today.',
     v_day,
     coalesce(v_sources, '(watchlist empty)')
   );
@@ -61,7 +61,7 @@ begin
     v_query,
     'supabase:daily-opportunity-scan',
     8,
-    'paid-coding-opportunities-watchlist-v1-' || v_day::text,
+    'paid-coding-opportunities-watchlist-v2-' || v_day::text,
     jsonb_build_object('purpose', 'daily_paid_opportunity_scan', 'local_day', v_day)
   )
   on conflict (dedupe_key) where dedupe_key is not null
