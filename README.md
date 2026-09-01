@@ -64,3 +64,5 @@ Progress means verified external usage, verified payment and repeat usage — no
 `POST /v1/research` prefers Gemini Google Search grounding. When Google returns quota exhaustion, the brain can fall back to bounded DuckDuckGo/Google News results and use Gemini only to synthesize the untrusted snippets with numbered source links. Set `OSA_WEB_SEARCH_FALLBACK_ENABLED=false` to fail closed instead.
 
 The optional Research Mailbox (`osa-research-mailbox.service`) consumes private Supabase jobs, calls the loopback-only research endpoint, and writes bounded answers and source URLs back to the job row. The worker uses a dedicated hashed machine token and a publishable Supabase key; it never stores a Supabase service-role key.
+
+`ops/sql/schedule-research-mailbox.sql` schedules one deduplicated, source-verification-focused paid-opportunity scan at 06:00 UTC each day. The database only queues work; the VPS performs the search, so the schedule survives closed ChatGPT/Codex sessions.

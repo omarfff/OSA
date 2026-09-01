@@ -61,3 +61,12 @@ test('research mailbox unit and installer are hardened and secret-free', () => {
   assert.match(sql, /for update skip locked/i);
   assert.doesNotMatch(sql, /service_role[_-]?key/i);
 });
+
+test('daily opportunity scan is deduplicated and source-verification focused', () => {
+  const sql = fs.readFileSync('ops/sql/schedule-research-mailbox.sql', 'utf8');
+  assert.match(sql, /osa-daily-paid-opportunity-scan/);
+  assert.match(sql, /on conflict \(dedupe_key\)/i);
+  assert.match(sql, /official direct task URL/i);
+  assert.match(sql, /No sufficiently verified task found today/);
+  assert.match(sql, /revoke all .*service_role/i);
+});
