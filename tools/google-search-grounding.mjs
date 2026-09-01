@@ -157,7 +157,19 @@ async function fetchLockedSource(initialUrl, fetchImpl, timeoutMs) {
     if (body.length > SEARCH_RESPONSE_LIMIT) throw new Error('locked_source_too_large');
     const title = cleanHtml(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || current.hostname).slice(0, 240);
     const description = cleanHtml(body.replace(/<script\b[\s\S]*?<\/script>/gi, ' ').replace(/<style\b[\s\S]*?<\/style>/gi, ' ')).slice(0, 6000);
-    return { title: title || current.hostname, url: current.href, description };
+    const linkedIssues = [];
+    const seenIssues = new Set();
+    for (const match of body.matchAll(/href=["']([^"']+)["']/gi)) {
+      let linked;
+      try { linked = new URL(decodeXml(match[1]), current); } catch { continue; }
+      if (linked.protocol !== 'https:' || linked.hostname.toLowerCase() !== 'github.com') continue;
+      if (!/^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/issues\/\d+\/?$/.test(linked.pathname)) continue;
+      linked.search = ''; linked.hash = '';
+      if (seenIssues.has(linked.href)) continue;
+      seenIssues.add(linked.href); linkedIssues.push(linked);
+      if (linkedIssues.length >= 10) break;
+    }
+    return { title: title || current.hostname, url: current.href, description, linkedIssues };
   }
   throw new Error('locked_source_too_many_redirects');
 }
@@ -168,7 +180,21 @@ async function lockedSourceResults(query, fetchImpl, timeoutMs) {
   const settled = await Promise.all(urls.map(async (url) => {
     try { return await fetchLockedSource(url, fetchImpl, timeoutMs); } catch { return null; }
   }));
-  return settled.filter(Boolean);
+  const primary = settled.filter(Boolean);
+  const seen = new Set(primary.map((item) => item.url));
+  const linked = [];
+  for (const item of primary) {
+    for (const url of item.linkedIssues || []) {
+      if (seen.has(url.href)) continue;
+      seen.add(url.href); linked.push(url);
+      if (linked.length >= 10) break;
+    }
+    if (linked.length >= 10) break;
+  }
+  const verified = await Promise.all(linked.map(async (url) => {
+    try { return await fetchLockedSource(url, fetchImpl, timeoutMs); } catch { return null; }
+  }));
+  return [...primary, ...verified.filter(Boolean)].map(({ linkedIssues, ...item }) => item);
 }
 
 function unwrapDuckDuckGoUrl(value = '') {
