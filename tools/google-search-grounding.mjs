@@ -6,6 +6,11 @@ const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const DEFAULT_USAGE_FILE = '/var/lib/osa-brain/google-search-usage.json';
 const SEARCH_RESULT_LIMIT = 12;
 const SEARCH_RESPONSE_LIMIT = 1_000_000;
+const LOCKED_SOURCE_LIMIT = 20;
+const LOCKED_SOURCE_HOSTS = new Set([
+  'github.com', 'algora.io', 'earn.superteam.fun', 'superteam.fun',
+  'api.docs.algora.io', 'opire.dev', 'app.opire.dev',
+]);
 
 function failure(message, statusCode) {
   return Object.assign(new Error(message), { statusCode });
@@ -116,6 +121,56 @@ function cleanHtml(value = '') {
   return decodeXml(value).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+export function lockedSourceUrls(query) {
+  const seen = new Set(); const urls = [];
+  for (const raw of String(query).match(/https:\/\/[^\s<>"']+/gi) || []) {
+    let parsed;
+    try { parsed = new URL(raw.replace(/[),.;]+$/, '')); } catch { continue; }
+    const host = parsed.hostname.toLowerCase();
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || !LOCKED_SOURCE_HOSTS.has(host)) continue;
+    if (seen.has(parsed.href)) continue;
+    seen.add(parsed.href); urls.push(parsed);
+    if (urls.length >= LOCKED_SOURCE_LIMIT) break;
+  }
+  return urls;
+}
+
+async function fetchLockedSource(initialUrl, fetchImpl, timeoutMs) {
+  let current = new URL(initialUrl);
+  for (let hop = 0; hop <= 3; hop += 1) {
+    const response = await fetchImpl(current, {
+      redirect: 'manual',
+      headers: { accept: 'text/html,application/xhtml+xml,application/json;q=0.8', 'user-agent': 'Mozilla/5.0 (compatible; OSA-Brain/1.0; locked-source research)' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers?.get?.('location');
+      if (!location) throw new Error('locked_source_redirect_without_location');
+      const next = new URL(location, current);
+      if (next.protocol !== 'https:' || !LOCKED_SOURCE_HOSTS.has(next.hostname.toLowerCase())) throw new Error('locked_source_redirect_rejected');
+      current = next; continue;
+    }
+    if (!response.ok) throw new Error(`locked_source_http_${response.status}`);
+    const declared = Number(response.headers?.get?.('content-length') || 0);
+    if (declared > SEARCH_RESPONSE_LIMIT) throw new Error('locked_source_too_large');
+    const body = await response.text();
+    if (body.length > SEARCH_RESPONSE_LIMIT) throw new Error('locked_source_too_large');
+    const title = cleanHtml(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || current.hostname).slice(0, 240);
+    const description = cleanHtml(body.replace(/<script\b[\s\S]*?<\/script>/gi, ' ').replace(/<style\b[\s\S]*?<\/style>/gi, ' ')).slice(0, 6000);
+    return { title: title || current.hostname, url: current.href, description };
+  }
+  throw new Error('locked_source_too_many_redirects');
+}
+
+async function lockedSourceResults(query, fetchImpl, timeoutMs) {
+  const urls = lockedSourceUrls(query);
+  if (!urls.length) return null;
+  const settled = await Promise.all(urls.map(async (url) => {
+    try { return await fetchLockedSource(url, fetchImpl, timeoutMs); } catch { return null; }
+  }));
+  return settled.filter(Boolean);
+}
+
 function unwrapDuckDuckGoUrl(value = '') {
   let raw = decodeXml(value).trim();
   if (raw.startsWith('//')) raw = `https:${raw}`;
@@ -200,8 +255,9 @@ async function webSearchResults(query, fetchImpl, timeoutMs) {
 }
 
 async function searchThenSynthesize({ cleanQuery, model, env, fetchImpl, endpoint, timeoutMs }) {
-  const results = await webSearchResults(cleanQuery, fetchImpl, timeoutMs);
-  if (!results.length) throw failure('web_search_fallback_no_results', 502);
+  const locked = await lockedSourceResults(cleanQuery, fetchImpl, timeoutMs);
+  const results = locked === null ? await webSearchResults(cleanQuery, fetchImpl, timeoutMs) : locked;
+  if (!results.length) throw failure(locked === null ? 'web_search_fallback_no_results' : 'locked_sources_unavailable', 502);
   const evidence = results.map((item, index) => `[${index + 1}] ${item.title}\nURL: ${item.url}\nSnippet: ${item.description || '(no snippet)'}`).join('\n\n');
   const prompt = [
     'You are OSA Brain. Answer the research request only from the search-result evidence below.',
@@ -227,7 +283,7 @@ async function searchThenSynthesize({ cleanQuery, model, env, fetchImpl, endpoin
     search_queries: [cleanQuery],
     grounded: false,
     source_backed: true,
-    provider: 'web-search+gemini',
+    provider: locked === null ? 'web-search+gemini' : 'locked-sources+gemini',
   };
 }
 

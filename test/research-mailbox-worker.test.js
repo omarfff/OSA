@@ -69,4 +69,7 @@ test('daily opportunity scan is deduplicated and source-verification focused', (
   assert.match(sql, /official direct task URL/i);
   assert.match(sql, /No sufficiently verified task found today/);
   assert.match(sql, /revoke all .*service_role/i);
+  assert.match(sql, /osa_research_watch_sources/);
+  assert.match(sql, /cross-check the reward platform against the canonical GitHub issue/i);
+  assert.equal((sql.match(/https:\/\//g) || []).length, 21);
 });

@@ -65,4 +65,4 @@ Progress means verified external usage, verified payment and repeat usage — no
 
 The optional Research Mailbox (`osa-research-mailbox.service`) consumes private Supabase jobs, calls the loopback-only research endpoint, and writes bounded answers and source URLs back to the job row. The worker uses a dedicated hashed machine token and a publishable Supabase key; it never stores a Supabase service-role key.
 
-`ops/sql/schedule-research-mailbox.sql` schedules one deduplicated, source-verification-focused paid-opportunity scan at 06:00 UTC each day. The database only queues work; the VPS performs the search, so the schedule survives closed ChatGPT/Codex sessions.
+`ops/sql/schedule-research-mailbox.sql` stores the locked bounty watchlist and schedules one deduplicated, source-verification-focused paid-opportunity scan at 06:00 UTC each day. Each candidate must agree with its canonical GitHub issue state and maintainer instructions. The database only queues work; the VPS performs the search, so the schedule survives closed ChatGPT/Codex sessions.

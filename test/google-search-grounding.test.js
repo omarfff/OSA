@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { googleSearchGrounded, googleSearchStatus } from '../tools/google-search-grounding.mjs';
+import { googleSearchGrounded, googleSearchStatus, lockedSourceUrls } from '../tools/google-search-grounding.mjs';
 
 test('Google grounding is disabled and secret-free by default', () => {
   const status = googleSearchStatus({});
@@ -82,5 +82,30 @@ test('web fallback can be explicitly disabled', async () => {
       env: { OSA_GOOGLE_SEARCH_ENABLED: 'true', OSA_WEB_SEARCH_FALLBACK_ENABLED: 'false', GEMINI_API_KEY: 'test-google-key-that-is-long-enough' },
       fetchImpl: async () => ({ ok: false, status: 429 }),
     }), /google_search_http_429/);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('locked URL research reads only the supplied allowlisted sources', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'osa-google-'));
+  const calls = [];
+  const headers = { get: () => null };
+  const fakeFetch = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    if (calls.length === 1) return { ok: false, status: 429 };
+    if (String(url).startsWith('https://github.com/')) return { ok: true, status: 200, headers, text: async () => '<title>Issue A</title><main>Status: Open. Reward: $100.</main>' };
+    if (String(url).startsWith('https://algora.io/')) return { ok: true, status: 200, headers, text: async () => '<title>Algora</title><main>Open 0. No open bounties.</main>' };
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'One candidate is open [1].' }] } }] }) };
+  };
+  try {
+    const query = 'Inspect exact locked list: https://github.com/acme/repo/issues/1 https://algora.io/acme/bounties https://example.com/ignore';
+    assert.deepEqual(lockedSourceUrls(query).map(String), ['https://github.com/acme/repo/issues/1', 'https://algora.io/acme/bounties']);
+    const out = await googleSearchGrounded({
+      query, fetchImpl: fakeFetch, usageFile: path.join(dir, 'usage.json'),
+      env: { OSA_GOOGLE_SEARCH_ENABLED: 'true', GEMINI_API_KEY: 'test-google-key-that-is-long-enough' },
+    });
+    assert.equal(out.provider, 'locked-sources+gemini');
+    assert.deepEqual(out.sources.map((x) => x.url), ['https://github.com/acme/repo/issues/1', 'https://algora.io/acme/bounties']);
+    assert.equal(calls.some((x) => x.url.includes('duckduckgo.com') || x.url.includes('news.google.com')), false);
+    assert.match(JSON.parse(calls.at(-1).options.body).contents[0].parts[0].text, /No open bounties/);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
