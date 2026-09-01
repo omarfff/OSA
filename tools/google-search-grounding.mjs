@@ -159,7 +159,8 @@ async function fetchLockedSource(initialUrl, fetchImpl, timeoutMs) {
     const description = cleanHtml(body.replace(/<script\b[\s\S]*?<\/script>/gi, ' ').replace(/<style\b[\s\S]*?<\/style>/gi, ' ')).slice(0, 6000);
     const linkedIssues = [];
     const seenIssues = new Set();
-    for (const match of body.matchAll(/href=["']([^"']+)["']/gi)) {
+    const issueLinks = current.hostname.toLowerCase() === 'github.com' ? [] : body.matchAll(/href=["']([^"']+)["']/gi);
+    for (const match of issueLinks) {
       let linked;
       try { linked = new URL(decodeXml(match[1]), current); } catch { continue; }
       if (linked.protocol !== 'https:' || linked.hostname.toLowerCase() !== 'github.com') continue;
