@@ -35,7 +35,9 @@ jobs:
           test -n "$OIDC_TOKEN"
           CLAIM_PAYLOAD="$(jq -n --arg action claim --arg job_id "$JOB_ID" --arg public_key "$(cat /tmp/osa_key.pub)" '{action:$action,job_id:$job_id,public_key:$public_key}')"
           CLAIM_FILE="$(mktemp)"
-          CLAIM_HTTP="$(curl --max-time 20 -sS -o "$CLAIM_FILE" -w '%{http_code}' -H "Authorization: Bearer ${OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$CLAIM_PAYLOAD" "$BROKER_URL" || true)"
+          # Broker claim can legitimately wait up to ~90s while the VPS signs the short-lived SSH certificate.
+          # Use one long request rather than ambiguous retries.
+          CLAIM_HTTP="$(curl --connect-timeout 10 --max-time 110 -sS -o "$CLAIM_FILE" -w '%{http_code}' -H "Authorization: Bearer ${OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$CLAIM_PAYLOAD" "$BROKER_URL" || true)"
           if [ "$CLAIM_HTTP" = "409" ]; then
             CLAIM_ERROR="$(jq -r '.error // empty' "$CLAIM_FILE" 2>/dev/null || true)"
             CLAIM_STATE="$(jq -r '.state // empty' "$CLAIM_FILE" 2>/dev/null || true)"
