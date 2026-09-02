@@ -10,6 +10,10 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: osa-raw-ssh-dispatch-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   raw-ssh:
     runs-on: ubuntu-latest
@@ -21,14 +25,17 @@ jobs:
           BROKER_URL: https://jpnlmpqqtiwisxcsjwbm.supabase.co/functions/v1/osa-github-ssh-broker
         run: |
           set -euo pipefail
-          JOB_ID="$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/ops/raw-ssh-trigger.txt" | tr -d '\r\n[:space:]')"
+          umask 077
+
+          JOB_ID="$(curl --max-time 15 -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/ops/raw-ssh-trigger.txt" | tr -d '\r\n[:space:]')"
           if ! [[ "$JOB_ID" =~ ^[0-9a-fA-F-]{36}$ ]]; then echo "invalid job id" >&2; exit 2; fi
 
           ssh-keygen -q -t ed25519 -N '' -C "osa-gh-${GITHUB_RUN_ID}" -f /tmp/osa_key
-          OIDC_TOKEN="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value')"
+          OIDC_TOKEN="$(curl --max-time 15 -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value')"
+          test -n "$OIDC_TOKEN"
           CLAIM_PAYLOAD="$(jq -n --arg action claim --arg job_id "$JOB_ID" --arg public_key "$(cat /tmp/osa_key.pub)" '{action:$action,job_id:$job_id,public_key:$public_key}')"
           CLAIM_FILE="$(mktemp)"
-          CLAIM_HTTP="$(curl -sS -o "$CLAIM_FILE" -w '%{http_code}' -H "Authorization: Bearer ${OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$CLAIM_PAYLOAD" "$BROKER_URL" || true)"
+          CLAIM_HTTP="$(curl --max-time 20 -sS -o "$CLAIM_FILE" -w '%{http_code}' -H "Authorization: Bearer ${OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$CLAIM_PAYLOAD" "$BROKER_URL" || true)"
           if [ "$CLAIM_HTTP" = "409" ]; then
             CLAIM_ERROR="$(jq -r '.error // empty' "$CLAIM_FILE" 2>/dev/null || true)"
             CLAIM_STATE="$(jq -r '.state // empty' "$CLAIM_FILE" 2>/dev/null || true)"
@@ -37,14 +44,13 @@ jobs:
               exit 0
             fi
             echo "RAW SSH claim conflict HTTP 409 error=${CLAIM_ERROR:-unknown} state=${CLAIM_STATE:-unknown}" >&2
-            cat "$CLAIM_FILE" >&2 || true
             exit 24
           fi
           if ! [[ "$CLAIM_HTTP" =~ ^2[0-9][0-9]$ ]]; then
-            echo "RAW SSH claim failed HTTP ${CLAIM_HTTP}" >&2
-            cat "$CLAIM_FILE" >&2 || true
+            echo "RAW SSH broker claim failed HTTP ${CLAIM_HTTP}" >&2
             exit 22
           fi
+
           CLAIM="$(cat "$CLAIM_FILE")"
           test "$(jq -r '.ok' <<<"$CLAIM")" = "true"
           HOST="$(jq -r '.host' <<<"$CLAIM")"
@@ -55,82 +61,89 @@ jobs:
           CMD_B64="$(jq -r '.command_b64' <<<"$CLAIM")"
           REPORT_TOKEN="$(jq -r '.report_token' <<<"$CLAIM")"
           test ${#REPORT_TOKEN} -eq 64
-          CLAIM_ACTIVE=1
-          REMOTE_STARTED=0
-          release_preflight_claim() {
-            RC_LOCAL=$?
-            trap - EXIT
-            if [ "$RC_LOCAL" -ne 0 ] && [ "${CLAIM_ACTIVE:-0}" -eq 1 ] && [ "${REMOTE_STARTED:-0}" -eq 0 ]; then
-              set +e
-              for RELEASE_ATTEMPT in 1 2 3; do
-                RELEASE_OIDC_TOKEN="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value' 2>/dev/null)"
-                RELEASE_PAYLOAD="$(jq -n --arg action release --arg job_id "$JOB_ID" --arg report_token "$REPORT_TOKEN" --arg reason "runner_preflight_exit_${RC_LOCAL}" '{action:$action,job_id:$job_id,report_token:$report_token,reason:$reason}')"
-                RELEASE_FILE="$(mktemp)"
-                RELEASE_HTTP="$(curl -sS -o "$RELEASE_FILE" -w '%{http_code}' -H "Authorization: Bearer ${RELEASE_OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$RELEASE_PAYLOAD" "$BROKER_URL" || true)"
-                if [[ "$RELEASE_HTTP" =~ ^2[0-9][0-9]$ ]]; then
-                  echo "RAW SSH preflight claim released for retry."
-                  CLAIM_ACTIVE=0
-                  break
-                fi
-                echo "RAW SSH preflight release attempt ${RELEASE_ATTEMPT} failed HTTP ${RELEASE_HTTP}" >&2
-                cat "$RELEASE_FILE" >&2 || true
-                sleep "$RELEASE_ATTEMPT"
-              done
-              set -e
-            fi
-            exit "$RC_LOCAL"
+
+          REPORT_SENT=0
+          report_result() {
+            local rc="$1" out_file="$2" err_file="$3"
+            [ "$REPORT_SENT" -eq 0 ] || return 0
+            local payload report_oidc report_file report_http attempt
+            payload="$(jq -n --arg action report --arg job_id "$JOB_ID" --arg report_token "$REPORT_TOKEN" --argjson exit_code "$rc" --rawfile stdout "$out_file" --rawfile stderr "$err_file" '{action:$action,job_id:$job_id,report_token:$report_token,exit_code:$exit_code,stdout:$stdout,stderr:$stderr}')"
+            for attempt in 1 2 3; do
+              report_oidc="$(curl --max-time 15 -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value')"
+              report_file="$(mktemp)"
+              report_http="$(curl --max-time 20 -sS -o "$report_file" -w '%{http_code}' -H "Authorization: Bearer ${report_oidc}" -H 'Content-Type: application/json' --data "$payload" "$BROKER_URL" || true)"
+              if [[ "$report_http" =~ ^2[0-9][0-9]$ ]]; then REPORT_SENT=1; return 0; fi
+              echo "RAW SSH report attempt ${attempt} failed HTTP ${report_http}" >&2
+              sleep "$attempt"
+            done
+            return 1
           }
-          trap release_preflight_claim EXIT
+
+          fail_local() {
+            local rc="$1" msg="$2"
+            : > /tmp/osa_stdout
+            printf '%s\n' "$msg" > /tmp/osa_stderr
+            report_result "$rc" /tmp/osa_stdout /tmp/osa_stderr || true
+            echo "$msg" >&2
+            exit "$rc"
+          }
 
           printf '%s\n' "$CERT" > /tmp/osa_key-cert.pub
           chmod 600 /tmp/osa_key /tmp/osa_key-cert.pub
-          printf '%s' "$CMD_B64" | base64 -d > /tmp/osa_command.sh
+          if ! printf '%s' "$CMD_B64" | base64 -d > /tmp/osa_command.sh; then
+            fail_local 28 "invalid broker command encoding"
+          fi
           chmod 600 /tmp/osa_command.sh
+
+          IS_CLAWLANCER=0
+          if grep -Fq '/opt/osa/secrets/clawlancer_osa_revenue_cdp.json' /tmp/osa_command.sh; then
+            fail_local 25 "protected Clawlancer secret path is forbidden in raw SSH commands"
+          fi
+          if grep -Fq '/opt/osa/workspace/clawlancer_client.py' /tmp/osa_command.sh; then
+            IS_CLAWLANCER=1
+            NORMALIZED="$(tr -d '\r' < /tmp/osa_command.sh | sed -e 's/[[:space:]]*$//' -e '/^[[:space:]]*$/d')"
+            if ! [[ "$NORMALIZED" =~ ^(/usr/bin/python3|python3)[[:space:]]+/opt/osa/workspace/clawlancer_client\.py[[:space:]]+(balance|status|claim)$ ]]; then
+              fail_local 26 "unapproved Clawlancer helper invocation"
+            fi
+          fi
+
           CONNECT_PORT=""
           for CANDIDATE_PORT in "$PORT" 22; do
-            if [ -n "$CONNECT_PORT" ]; then break; fi
+            [ -n "$CONNECT_PORT" ] && break
             if [ "$CANDIDATE_PORT" = "22" ] && [ "$PORT" = "22" ]; then continue; fi
-            for SCAN_ATTEMPT in 1 2; do
-              if ssh-keyscan -T 5 -p "$CANDIDATE_PORT" -t ed25519 "$HOST" > /tmp/known_hosts 2>/dev/null && [ -s /tmp/known_hosts ]; then
+            for SCAN_ATTEMPT in 1 2 3 4; do
+              if ssh-keyscan -T 7 -p "$CANDIDATE_PORT" -t ed25519 "$HOST" > /tmp/known_hosts 2>/dev/null && [ -s /tmp/known_hosts ]; then
                 ACTUAL_FP="$(ssh-keygen -lf /tmp/known_hosts | awk 'NR==1{print $2}')"
-                if [ "$ACTUAL_FP" != "$EXPECTED_FP" ]; then echo "host key fingerprint mismatch on port ${CANDIDATE_PORT}" >&2; exit 3; fi
+                if [ "$ACTUAL_FP" != "$EXPECTED_FP" ]; then
+                  fail_local 3 "SSH host key fingerprint mismatch"
+                fi
                 CONNECT_PORT="$CANDIDATE_PORT"
                 break
               fi
-              echo "ssh-keyscan port ${CANDIDATE_PORT} attempt ${SCAN_ATTEMPT} failed" >&2
               sleep "$SCAN_ATTEMPT"
             done
           done
-          if [ -z "$CONNECT_PORT" ]; then echo "ssh-keyscan exhausted primary and fallback ports" >&2; exit 31; fi
+          if [ -z "$CONNECT_PORT" ]; then
+            fail_local 31 "SSH endpoint unreachable after bounded retries"
+          fi
           echo "RAW SSH using verified port ${CONNECT_PORT}."
 
-          REMOTE_STARTED=1
           set +e
           ssh -p "$CONNECT_PORT" -i /tmp/osa_key -o CertificateFile=/tmp/osa_key-cert.pub -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/tmp/known_hosts -o ConnectTimeout=15 "${PRINCIPAL}@${HOST}" 'bash -s' < /tmp/osa_command.sh > /tmp/osa_stdout 2> /tmp/osa_stderr
           RC=$?
           set -e
 
-          REPORT_PAYLOAD="$(jq -n --arg action report --arg job_id "$JOB_ID" --arg report_token "$REPORT_TOKEN" --argjson exit_code "$RC" --rawfile stdout /tmp/osa_stdout --rawfile stderr /tmp/osa_stderr '{action:$action,job_id:$job_id,report_token:$report_token,exit_code:$exit_code,stdout:$stdout,stderr:$stderr}')"
-          REPORT_OK=0
-          for ATTEMPT in 1 2 3; do
-            REPORT_OIDC_TOKEN="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value')"
-            REPORT_FILE="$(mktemp)"
-            REPORT_HTTP="$(curl -sS -o "$REPORT_FILE" -w '%{http_code}' -H "Authorization: Bearer ${REPORT_OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$REPORT_PAYLOAD" "$BROKER_URL" || true)"
-            if [[ "$REPORT_HTTP" =~ ^2[0-9][0-9]$ ]]; then
-              REPORT_OK=1
-              cat "$REPORT_FILE"
-              break
-            fi
-            echo "RAW SSH report attempt ${ATTEMPT} failed HTTP ${REPORT_HTTP}" >&2
-            cat "$REPORT_FILE" >&2 || true
-            sleep "$ATTEMPT"
-          done
-          if [ "$REPORT_OK" -ne 1 ]; then exit 23; fi
-          CLAIM_ACTIVE=0
-          trap - EXIT
+          if ! report_result "$RC" /tmp/osa_stdout /tmp/osa_stderr; then
+            exit 23
+          fi
 
-          cat /tmp/osa_stdout
-          cat /tmp/osa_stderr >&2
+          if [ "$IS_CLAWLANCER" -eq 1 ]; then
+            echo "Clawlancer helper completed; detailed output retained only in the OSA control plane."
+          else
+            cat /tmp/osa_stdout
+            cat /tmp/osa_stderr >&2
+          fi
+
           if [ "$RC" -ne 0 ]; then
             echo "::error::Remote OSA command exited ${RC}; failure is recorded in the OSA control plane."
             exit "$RC"
