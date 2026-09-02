@@ -38,7 +38,25 @@ jobs:
           OIDC_TOKEN="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value')"
           test -n "$OIDC_TOKEN"
           CLAIM_PAYLOAD="$(jq -n --arg action claim --arg job_id "$JOB_ID" --arg public_key "$(cat /tmp/osa_key.pub)" '{action:$action,job_id:$job_id,public_key:$public_key}')"
-          CLAIM="$(curl -fsSL -H "Authorization: Bearer ${OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$CLAIM_PAYLOAD" "$BROKER_URL")"
+          CLAIM_FILE="$(mktemp)"
+          CLAIM_HTTP="$(curl -sS -o "$CLAIM_FILE" -w '%{http_code}' -H "Authorization: Bearer ${OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$CLAIM_PAYLOAD" "$BROKER_URL" || true)"
+          if [ "$CLAIM_HTTP" = "409" ]; then
+            CLAIM_ERROR="$(jq -r '.error // empty' "$CLAIM_FILE" 2>/dev/null || true)"
+            CLAIM_STATE="$(jq -r '.state // empty' "$CLAIM_FILE" 2>/dev/null || true)"
+            if [ "$CLAIM_ERROR" = "job_not_pending" ] && [ "$CLAIM_STATE" = "succeeded" ]; then
+              echo "RAW SSH job ${JOB_ID} already succeeded; idempotent no-op."
+              exit 0
+            fi
+            echo "RAW SSH claim conflict HTTP 409 error=${CLAIM_ERROR:-unknown} state=${CLAIM_STATE:-unknown}" >&2
+            cat "$CLAIM_FILE" >&2 || true
+            exit 24
+          fi
+          if ! [[ "$CLAIM_HTTP" =~ ^2[0-9][0-9]$ ]]; then
+            echo "RAW SSH claim failed HTTP ${CLAIM_HTTP}" >&2
+            cat "$CLAIM_FILE" >&2 || true
+            exit 22
+          fi
+          CLAIM="$(cat "$CLAIM_FILE")"
           test "$(jq -r '.ok' <<<"$CLAIM")" = "true"
 
           HOST="$(jq -r '.host' <<<"$CLAIM")"
@@ -76,14 +94,16 @@ jobs:
           done
           if [ "$REPORT_OK" -ne 1 ]; then exit 23; fi
 
+          cat /tmp/osa_stdout
+          cat /tmp/osa_stderr >&2
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::Remote OSA command exited ${RC}; failure is recorded in the OSA control plane."
+            exit "$RC"
+          fi
+
           if [ "$GITHUB_EVENT_NAME" = "issues" ]; then
             ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
             gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed >/dev/null 2>&1 || true
           fi
 
-          cat /tmp/osa_stdout
-          cat /tmp/osa_stderr >&2
-          if [ "$RC" -ne 0 ]; then
-            echo "::warning::Remote OSA command exited ${RC}; failure is recorded in the OSA control plane."
-          fi
           exit 0
