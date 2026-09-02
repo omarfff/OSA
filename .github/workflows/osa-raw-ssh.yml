@@ -5,17 +5,13 @@ on:
     branches: [main]
     paths:
       - 'ops/raw-ssh-trigger.txt'
-  issues:
-    types: [opened]
 
 permissions:
   contents: read
   id-token: write
-  issues: write
 
 jobs:
   raw-ssh:
-    if: github.event_name == 'push' || startsWith(github.event.issue.title, 'OSA-RAW-SSH:')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -23,15 +19,11 @@ jobs:
         shell: bash
         env:
           BROKER_URL: https://jpnlmpqqtiwisxcsjwbm.supabase.co/functions/v1/osa-github-ssh-broker
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            JOB_ID="$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/ops/raw-ssh-trigger.txt" | tr -d '\r\n[:space:]')"
-          else
-            TITLE="$(jq -r '.issue.title' "$GITHUB_EVENT_PATH")"
-            JOB_ID="${TITLE#OSA-RAW-SSH:}"
-          fi
+          umask 077
+
+          JOB_ID="$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/ops/raw-ssh-trigger.txt" | tr -d '\r\n[:space:]')"
           if ! [[ "$JOB_ID" =~ ^[0-9a-fA-F-]{36}$ ]]; then echo "invalid job id" >&2; exit 2; fi
 
           ssh-keygen -q -t ed25519 -N '' -C "osa-gh-${GITHUB_RUN_ID}" -f /tmp/osa_key
@@ -48,12 +40,10 @@ jobs:
               exit 0
             fi
             echo "RAW SSH claim conflict HTTP 409 error=${CLAIM_ERROR:-unknown} state=${CLAIM_STATE:-unknown}" >&2
-            cat "$CLAIM_FILE" >&2 || true
             exit 24
           fi
           if ! [[ "$CLAIM_HTTP" =~ ^2[0-9][0-9]$ ]]; then
             echo "RAW SSH claim failed HTTP ${CLAIM_HTTP}" >&2
-            cat "$CLAIM_FILE" >&2 || true
             exit 22
           fi
           CLAIM="$(cat "$CLAIM_FILE")"
@@ -72,6 +62,22 @@ jobs:
           printf '%s' "$CMD_B64" | base64 -d > /tmp/osa_command.sh
           chmod 600 /tmp/osa_command.sh
 
+          # Fail closed for the protected Clawlancer credential. The only allowed
+          # Clawlancer VPS execution path is the secret-safe helper with one of its
+          # explicitly approved actions. This prevents accidental credential reads
+          # from ever reaching GitHub logs.
+          if grep -Fq '/opt/osa/secrets/clawlancer_osa_revenue_cdp.json' /tmp/osa_command.sh; then
+            echo "protected Clawlancer secret path is forbidden in raw SSH commands" >&2
+            exit 25
+          fi
+          if grep -Fq '/opt/osa/workspace/clawlancer_client.py' /tmp/osa_command.sh; then
+            NORMALIZED="$(tr -d '\r' < /tmp/osa_command.sh | sed -e 's/[[:space:]]*$//' -e '/^[[:space:]]*$/d')"
+            if ! [[ "$NORMALIZED" =~ ^(/usr/bin/python3|python3)[[:space:]]+/opt/osa/workspace/clawlancer_client\.py[[:space:]]+(balance|status|claim)$ ]]; then
+              echo "unapproved Clawlancer helper invocation" >&2
+              exit 26
+            fi
+          fi
+
           ssh-keyscan -T 10 -p "$PORT" -t ed25519 "$HOST" > /tmp/known_hosts 2>/dev/null
           ACTUAL_FP="$(ssh-keygen -lf /tmp/known_hosts | awk 'NR==1{print $2}')"
           if [ "$ACTUAL_FP" != "$EXPECTED_FP" ]; then echo "host key fingerprint mismatch" >&2; exit 3; fi
@@ -87,9 +93,8 @@ jobs:
             REPORT_OIDC_TOKEN="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value')"
             REPORT_FILE="$(mktemp)"
             REPORT_HTTP="$(curl -sS -o "$REPORT_FILE" -w '%{http_code}' -H "Authorization: Bearer ${REPORT_OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$REPORT_PAYLOAD" "$BROKER_URL" || true)"
-            if [[ "$REPORT_HTTP" =~ ^2[0-9][0-9]$ ]]; then REPORT_OK=1; cat "$REPORT_FILE"; break; fi
+            if [[ "$REPORT_HTTP" =~ ^2[0-9][0-9]$ ]]; then REPORT_OK=1; break; fi
             echo "RAW SSH report attempt ${ATTEMPT} failed HTTP ${REPORT_HTTP}" >&2
-            cat "$REPORT_FILE" >&2 || true
             sleep "$ATTEMPT"
           done
           if [ "$REPORT_OK" -ne 1 ]; then exit 23; fi
@@ -99,11 +104,6 @@ jobs:
           if [ "$RC" -ne 0 ]; then
             echo "::error::Remote OSA command exited ${RC}; failure is recorded in the OSA control plane."
             exit "$RC"
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "issues" ]; then
-            ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
-            gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed >/dev/null 2>&1 || true
           fi
 
           exit 0
