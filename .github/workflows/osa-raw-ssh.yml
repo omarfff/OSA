@@ -10,6 +10,10 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: osa-raw-ssh-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   raw-ssh:
     runs-on: ubuntu-latest
