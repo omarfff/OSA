@@ -61,50 +61,79 @@ jobs:
           CMD_B64="$(jq -r '.command_b64' <<<"$CLAIM")"
           REPORT_TOKEN="$(jq -r '.report_token' <<<"$CLAIM")"
           test ${#REPORT_TOKEN} -eq 64
+
+          REPORT_SENT=0
+          report_result() {
+            local rc="$1"
+            local out_file="$2"
+            local err_file="$3"
+            [ "$REPORT_SENT" -eq 0 ] || return 0
+            local payload report_oidc report_file report_http attempt
+            payload="$(jq -n --arg action report --arg job_id "$JOB_ID" --arg report_token "$REPORT_TOKEN" --argjson exit_code "$rc" --rawfile stdout "$out_file" --rawfile stderr "$err_file" '{action:$action,job_id:$job_id,report_token:$report_token,exit_code:$exit_code,stdout:$stdout,stderr:$stderr}')"
+            for attempt in 1 2 3; do
+              report_oidc="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value')"
+              report_file="$(mktemp)"
+              report_http="$(curl -sS -o "$report_file" -w '%{http_code}' -H "Authorization: Bearer ${report_oidc}" -H 'Content-Type: application/json' --data "$payload" "$BROKER_URL" || true)"
+              if [[ "$report_http" =~ ^2[0-9][0-9]$ ]]; then REPORT_SENT=1; return 0; fi
+              echo "RAW SSH report attempt ${attempt} failed HTTP ${report_http}" >&2
+              sleep "$attempt"
+            done
+            return 1
+          }
+
+          fail_local() {
+            local rc="$1"
+            local msg="$2"
+            : > /tmp/osa_stdout
+            printf '%s\n' "$msg" > /tmp/osa_stderr
+            report_result "$rc" /tmp/osa_stdout /tmp/osa_stderr || true
+            echo "$msg" >&2
+            exit "$rc"
+          }
+
           printf '%s\n' "$CERT" > /tmp/osa_key-cert.pub
           chmod 600 /tmp/osa_key /tmp/osa_key-cert.pub
-          printf '%s' "$CMD_B64" | base64 -d > /tmp/osa_command.sh
+          if ! printf '%s' "$CMD_B64" | base64 -d > /tmp/osa_command.sh; then
+            fail_local 28 "invalid broker command encoding"
+          fi
           chmod 600 /tmp/osa_command.sh
 
-          # Fail closed for the protected Clawlancer credential. The only allowed
-          # Clawlancer VPS execution path is the secret-safe helper with one of its
-          # explicitly approved actions. This prevents accidental credential reads
-          # from ever reaching GitHub logs.
+          IS_CLAWLANCER=0
           if grep -Fq '/opt/osa/secrets/clawlancer_osa_revenue_cdp.json' /tmp/osa_command.sh; then
-            echo "protected Clawlancer secret path is forbidden in raw SSH commands" >&2
-            exit 25
+            fail_local 25 "protected Clawlancer secret path is forbidden in raw SSH commands"
           fi
           if grep -Fq '/opt/osa/workspace/clawlancer_client.py' /tmp/osa_command.sh; then
+            IS_CLAWLANCER=1
             NORMALIZED="$(tr -d '\r' < /tmp/osa_command.sh | sed -e 's/[[:space:]]*$//' -e '/^[[:space:]]*$/d')"
             if ! [[ "$NORMALIZED" =~ ^(/usr/bin/python3|python3)[[:space:]]+/opt/osa/workspace/clawlancer_client\.py[[:space:]]+(balance|status|claim)$ ]]; then
-              echo "unapproved Clawlancer helper invocation" >&2
-              exit 26
+              fail_local 26 "unapproved Clawlancer helper invocation"
             fi
           fi
 
-          ssh-keyscan -T 10 -p "$PORT" -t ed25519 "$HOST" > /tmp/known_hosts 2>/dev/null
+          if ! ssh-keyscan -T 10 -p "$PORT" -t ed25519 "$HOST" > /tmp/known_hosts 2>/dev/null; then
+            fail_local 27 "SSH host key scan failed"
+          fi
           ACTUAL_FP="$(ssh-keygen -lf /tmp/known_hosts | awk 'NR==1{print $2}')"
-          if [ "$ACTUAL_FP" != "$EXPECTED_FP" ]; then echo "host key fingerprint mismatch" >&2; exit 3; fi
+          if [ "$ACTUAL_FP" != "$EXPECTED_FP" ]; then
+            fail_local 3 "SSH host key fingerprint mismatch"
+          fi
 
           set +e
           ssh -p "$PORT" -i /tmp/osa_key -o CertificateFile=/tmp/osa_key-cert.pub -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/tmp/known_hosts -o ConnectTimeout=15 "${PRINCIPAL}@${HOST}" 'bash -s' < /tmp/osa_command.sh > /tmp/osa_stdout 2> /tmp/osa_stderr
           RC=$?
           set -e
 
-          REPORT_PAYLOAD="$(jq -n --arg action report --arg job_id "$JOB_ID" --arg report_token "$REPORT_TOKEN" --argjson exit_code "$RC" --rawfile stdout /tmp/osa_stdout --rawfile stderr /tmp/osa_stderr '{action:$action,job_id:$job_id,report_token:$report_token,exit_code:$exit_code,stdout:$stdout,stderr:$stderr}')"
-          REPORT_OK=0
-          for ATTEMPT in 1 2 3; do
-            REPORT_OIDC_TOKEN="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-raw-ssh" | jq -r '.value')"
-            REPORT_FILE="$(mktemp)"
-            REPORT_HTTP="$(curl -sS -o "$REPORT_FILE" -w '%{http_code}' -H "Authorization: Bearer ${REPORT_OIDC_TOKEN}" -H 'Content-Type: application/json' --data "$REPORT_PAYLOAD" "$BROKER_URL" || true)"
-            if [[ "$REPORT_HTTP" =~ ^2[0-9][0-9]$ ]]; then REPORT_OK=1; break; fi
-            echo "RAW SSH report attempt ${ATTEMPT} failed HTTP ${REPORT_HTTP}" >&2
-            sleep "$ATTEMPT"
-          done
-          if [ "$REPORT_OK" -ne 1 ]; then exit 23; fi
+          if ! report_result "$RC" /tmp/osa_stdout /tmp/osa_stderr; then
+            exit 23
+          fi
 
-          cat /tmp/osa_stdout
-          cat /tmp/osa_stderr >&2
+          if [ "$IS_CLAWLANCER" -eq 1 ]; then
+            echo "Clawlancer helper completed; detailed output retained in the OSA control plane."
+          else
+            cat /tmp/osa_stdout
+            cat /tmp/osa_stderr >&2
+          fi
+
           if [ "$RC" -ne 0 ]; then
             echo "::error::Remote OSA command exited ${RC}; failure is recorded in the OSA control plane."
             exit "$RC"
