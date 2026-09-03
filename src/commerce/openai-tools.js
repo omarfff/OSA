@@ -21,7 +21,7 @@ export const CLOSING_TOOL_DEFINITIONS = Object.freeze([
       properties: Object.freeze({
         product_id: Object.freeze({ type: 'string' }),
         quantity: Object.freeze({ type: 'integer', minimum: 1, maximum: 20 }),
-        payment_rail: Object.freeze({ type: 'string', enum: Object.freeze(['direct_usdc', 'x402', 'nowpayments']) }),
+        payment_rail: Object.freeze({ type: 'string', enum: Object.freeze(['tap', 'direct_usdc', 'x402', 'nowpayments']) }),
         pay_currency: Object.freeze({ type: ['string', 'null'] }),
         customer_reference: Object.freeze({ type: 'string' }),
       }),
