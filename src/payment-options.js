@@ -9,6 +9,8 @@ const DEFAULTS = Object.freeze({
   x402: "0xCc34D733F5f387d0128021E636D023472CB5df0c",
   solana: "Fo6hiVofJdgHjnwPqwdBXs22QLd9oLLypiSUyrryinj5",
   solanaProof: "supabase:osa_wallet_registry:4e482f48-463c-4e9e-a5db-ce78818421e7",
+  tron: "TXzMju2v6QoevWaMkPaSwEuN6HbFibWW7o",
+  tronProof: "supabase:osa_wallet_registry:3550acc9-d347-443c-a432-4f522a6796a5",
   bitcoin: "bc1qzxqxvp9nauw673cdjfj083hasxwvn7uwzqgahm"
 });
 
@@ -29,15 +31,19 @@ export function paymentOptions() {
   const solanaOverride = optionalAddr("OSA_SOLANA_RECEIVE_ADDRESS");
   const solanaProofOverride = optionalAddr("OSA_SOLANA_OWNERSHIP_PROOF_REF");
   const solana = solanaOverride || DEFAULTS.solana;
-  // A proof tied to the canonical default wallet must never be reused for a
-  // different address supplied at runtime.
   const solanaOwnershipProofRef = solanaOverride
     ? solanaProofOverride
     : (solanaProofOverride || DEFAULTS.solanaProof);
   const solanaState = solana && solanaOwnershipProofRef ? "verified_receive" : "ownership_unverified";
 
-  const tron = optionalAddr("OSA_TRON_RECEIVE_ADDRESS");
-  const tronState = tron ? "configured" : "not_configured";
+  const tronOverride = optionalAddr("OSA_TRON_RECEIVE_ADDRESS");
+  const tronProofOverride = optionalAddr("OSA_TRON_OWNERSHIP_PROOF_REF");
+  const tron = tronOverride || DEFAULTS.tron;
+  const tronOwnershipProofRef = tronOverride
+    ? tronProofOverride
+    : (tronProofOverride || DEFAULTS.tronProof);
+  const tronState = tron && tronOwnershipProofRef ? "verified_receive" : "ownership_unverified";
+
   const bitcoin = requiredAddr("OSA_BITCOIN_RECEIVE_ADDRESS", DEFAULTS.bitcoin);
   const x402Config = resolveX402Config(process.env);
   const x402Enabled = Boolean(x402Config);
@@ -45,7 +51,7 @@ export function paymentOptions() {
   const x402Environment = x402Config ? (x402Config.isTestnet ? "testnet" : "mainnet") : "not_configured";
 
   return {
-    version: 4,
+    version: 5,
     preferred: {
       humanStablecoin: { network: "Base", asset: "USDC", address: base },
       agent: {
@@ -56,10 +62,10 @@ export function paymentOptions() {
         environment: x402Environment,
         payTo: x402Config?.payTo || x402Receive
       },
-      broadCryptoFallback: { network: "TRON", asset: "USDT", status: tronState, address: tron }
+      broadCryptoFallback: { network: "TRON", asset: "USDT", status: tronState, address: tronState === "verified_receive" ? tron : null }
     },
     solana: { status: solanaState, address: solanaState === "verified_receive" ? solana : null, ownershipProofRef: solanaOwnershipProofRef },
-    tron: { status: tronState, address: tron },
+    tron: { status: tronState, address: tronState === "verified_receive" ? tron : null, ownershipProofRef: tronOwnershipProofRef },
     directCrypto: [
       { network: "Base", caip2: "eip155:8453", assets: ["USDC", "ETH"], address: base },
       { network: "Ethereum", caip2: "eip155:1", assets: ["USDC", "USDT", "ETH"], address: evm },
@@ -67,7 +73,7 @@ export function paymentOptions() {
       { network: "Optimism", caip2: "eip155:10", assets: ["USDC", "USDT", "ETH"], address: evm },
       { network: "Polygon", caip2: "eip155:137", assets: ["USDC", "USDT", "POL"], address: evm },
       ...(solanaState === "verified_receive" ? [{ network: "Solana", caip2: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", assets: ["USDC", "USDT", "SOL"], address: solana }] : []),
-      ...(tron ? [{ network: "TRON", assets: ["USDT", "TRX"], address: tron }] : []),
+      ...(tronState === "verified_receive" ? [{ network: "TRON", assets: ["USDT", "TRX"], address: tron }] : []),
       { network: "Bitcoin", assets: ["BTC"], address: bitcoin, addressType: "P2WPKH" }
     ],
     fiat: {
