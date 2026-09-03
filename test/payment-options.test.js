@@ -3,13 +3,29 @@ import assert from "node:assert/strict";
 import { paymentOptions } from "../src/payment-options.js";
 const ADDRESS = "11111111111111111111111111111111";
 const solanaEntry = (o) => o.directCrypto.find((e) => e.network === "Solana");
-test("Solana receive rail stays hidden until ownership proof exists", () => {
+
+test("canonical Solana receive wallet is verified and runtime overrides fail closed without their own proof", () => {
   const oldAddress=process.env.OSA_SOLANA_RECEIVE_ADDRESS, oldProof=process.env.OSA_SOLANA_OWNERSHIP_PROOF_REF;
   try {
     delete process.env.OSA_SOLANA_RECEIVE_ADDRESS; delete process.env.OSA_SOLANA_OWNERSHIP_PROOF_REF;
-    let o=paymentOptions(); assert.equal(o.solana.status,"not_configured"); assert.equal(o.solana.address,null); assert.equal(solanaEntry(o),undefined);
-    process.env.OSA_SOLANA_RECEIVE_ADDRESS=ADDRESS; o=paymentOptions(); assert.equal(o.solana.status,"ownership_unverified"); assert.equal(o.solana.address,null); assert.equal(solanaEntry(o),undefined);
-    process.env.OSA_SOLANA_OWNERSHIP_PROOF_REF="wallet-audit:verified"; o=paymentOptions(); assert.equal(o.solana.status,"verified_receive"); assert.equal(o.solana.address,ADDRESS); assert.equal(solanaEntry(o)?.address,ADDRESS);
+    let o=paymentOptions();
+    assert.equal(o.solana.status,"verified_receive");
+    assert.equal(o.solana.address,"Fo6hiVofJdgHjnwPqwdBXs22QLd9oLLypiSUyrryinj5");
+    assert.match(o.solana.ownershipProofRef,/^supabase:osa_wallet_registry:/);
+    assert.equal(solanaEntry(o)?.address,"Fo6hiVofJdgHjnwPqwdBXs22QLd9oLLypiSUyrryinj5");
+
+    process.env.OSA_SOLANA_RECEIVE_ADDRESS=ADDRESS;
+    delete process.env.OSA_SOLANA_OWNERSHIP_PROOF_REF;
+    o=paymentOptions();
+    assert.equal(o.solana.status,"ownership_unverified");
+    assert.equal(o.solana.address,null);
+    assert.equal(solanaEntry(o),undefined);
+
+    process.env.OSA_SOLANA_OWNERSHIP_PROOF_REF="wallet-audit:verified";
+    o=paymentOptions();
+    assert.equal(o.solana.status,"verified_receive");
+    assert.equal(o.solana.address,ADDRESS);
+    assert.equal(solanaEntry(o)?.address,ADDRESS);
   } finally {
     oldAddress===undefined?delete process.env.OSA_SOLANA_RECEIVE_ADDRESS:process.env.OSA_SOLANA_RECEIVE_ADDRESS=oldAddress;
     oldProof===undefined?delete process.env.OSA_SOLANA_OWNERSHIP_PROOF_REF:process.env.OSA_SOLANA_OWNERSHIP_PROOF_REF=oldProof;
@@ -32,6 +48,7 @@ test("x402 public metadata matches runtime configuration", () => {
     o = paymentOptions();
     assert.equal(o.x402.status, "wallet_ready_facilitator_pending");
     assert.equal(o.x402.environment, "not_configured");
+    assert.equal(o.x402.payTo, "0xCc34D733F5f387d0128021E636D023472CB5df0c");
   } finally {
     for (const k of keys) old[k] === undefined ? delete process.env[k] : process.env[k] = old[k];
   }
