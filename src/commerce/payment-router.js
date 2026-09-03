@@ -1,5 +1,6 @@
 import { paymentOptions } from '../payment-options.js';
 import { nowPaymentsMissingConfig, nowPaymentsReady } from '../payments/nowpayments.js';
+import { tapRuntimeStatus } from '../payments/tap.js';
 
 function stripeRuntimeStatus(env = process.env) {
   const secret = String(env.STRIPE_SECRET_KEY || '').trim();
@@ -21,12 +22,24 @@ export function paymentRouterStatus(env = process.env) {
   const options = paymentOptions();
   const nowMissing = nowPaymentsMissingConfig(env);
   const stripe = stripeRuntimeStatus(env);
+  const tap = tapRuntimeStatus(env);
+  const preferredHuman = tap.status === 'configured' ? 'tap' : 'direct_usdc';
   return {
-    version: 2,
-    preferredHuman: 'direct_usdc',
+    version: 3,
+    preferredHuman,
+    preferredFiat: 'tap',
     preferredAgent: options.x402.status === 'enabled' && options.x402.environment === 'mainnet' ? 'x402' : 'direct_usdc',
     settlementPreference: ['USDC', 'USDT', 'BTC'],
     rails: {
+      tap: {
+        ...tap,
+        activation: 'tap_live_merchant_plus_https_post_and_redirect',
+        checkout: 'hosted_src_all',
+        countryPriority: 'SA',
+        supports: ['mada', 'card', 'apple_pay', 'google_pay', 'stc_pay', 'samsung_pay', 'bnpl_when_enabled'],
+        currencyDefault: 'SAR',
+        revenueProof: 'tap_charge_captured_plus_independent_retrieval',
+      },
       direct_usdc: {
         status: 'ready',
         network: 'eip155:8453',
@@ -51,16 +64,24 @@ export function paymentRouterStatus(env = process.env) {
       },
       stripe: {
         ...stripe,
+        priority: 'backup_only',
         activation: 'live_merchant_account_plus_webhook',
         supports: ['card', 'apple_pay', 'google_pay'],
         revenueProof: 'live_payment_success_plus_independent_stripe_retrieval',
+      },
+      paytabs: {
+        status: 'not_configured',
+        priority: 'fallback_if_tap_blocked',
+        activation: 'merchant_onboarding_and_live_credentials',
       },
     },
     acceptance: {
       directCrypto: options.directCrypto,
       fiat: {
         ...options.fiat,
-        stripe: { status: stripe.status, mode: stripe.mode },
+        tap: { status: tap.status, mode: tap.mode, primary: true },
+        stripe: { status: stripe.status, mode: stripe.mode, primary: false },
+        paytabs: { status: 'not_configured', primary: false },
       },
       agent: options.preferred.agent,
       broadCryptoAggregator: {
@@ -71,6 +92,7 @@ export function paymentRouterStatus(env = process.env) {
     safety: {
       neverCountTestModeAsRevenue: true,
       neverAdvertiseUnverifiedReceiveNetwork: true,
+      neverRouteToUnconfiguredFiat: true,
       ownerMoneyMovementRequiresApproval: true,
     },
   };
