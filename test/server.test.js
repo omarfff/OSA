@@ -6,6 +6,11 @@ process.env.VERCEL = '1';
 process.env.OSA_INGEST_KEY = 'test-key';
 delete process.env.OSA_PAY_TO;
 delete process.env.OSA_TRON_RECEIVE_ADDRESS;
+delete process.env.OSA_BASE_RECEIVE_ADDRESS;
+delete process.env.OSA_EVM_RECEIVE_ADDRESS;
+delete process.env.OSA_X402_RECEIVE_ADDRESS;
+delete process.env.OSA_SOLANA_RECEIVE_ADDRESS;
+delete process.env.OSA_SOLANA_OWNERSHIP_PROOF_REF;
 const { default: app } = await import('../src/server.js');
 const server = app.listen(0, '127.0.0.1');
 await once(server, 'listening');
@@ -30,24 +35,31 @@ test('rejects invalid history limit and max price', async () => {
   assert.equal((await fetch(`${base}/best?max_price=-1`)).status, 400);
 });
 
-test('payment options expose only registry-aligned public receive rails without secrets', async () => {
+test('payment options expose registry-aligned multi-network receive rails without secrets', async () => {
   const response = await fetch(`${base}/payment-options`);
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.version, 3);
+  assert.equal(body.version, 4);
   assert.equal(body.preferred.humanStablecoin.network, 'Base');
   assert.equal(body.preferred.humanStablecoin.asset, 'USDC');
   assert.equal(body.preferred.humanStablecoin.address, '0x559FbeCe1e1517d5cb0eD9FcB6D3383D58cf48d4');
-  assert.equal(body.solana.status, 'not_configured');
-  assert.equal(body.solana.address, null);
+  assert.equal(body.solana.status, 'verified_receive');
+  assert.equal(body.solana.address, 'Fo6hiVofJdgHjnwPqwdBXs22QLd9oLLypiSUyrryinj5');
+  assert.match(body.solana.ownershipProofRef, /^supabase:osa_wallet_registry:/);
   assert.equal(body.tron.status, 'not_configured');
   assert.equal(body.tron.address, null);
-  assert.equal(body.directCrypto.some((x) => x.network === 'Solana'), false);
+  assert.equal(body.directCrypto.some((x) => x.network === 'Solana' && x.address === 'Fo6hiVofJdgHjnwPqwdBXs22QLd9oLLypiSUyrryinj5'), true);
   assert.equal(body.directCrypto.some((x) => x.network === 'TRON'), false);
   assert.equal(body.directCrypto.some((x) => x.network === 'Bitcoin' && x.address === 'bc1qzxqxvp9nauw673cdjfj083hasxwvn7uwzqgahm'), true);
+  assert.equal(body.directCrypto.some((x) => x.network === 'Base' && x.address === '0x559FbeCe1e1517d5cb0eD9FcB6D3383D58cf48d4'), true);
+  for (const network of ['Ethereum', 'Arbitrum', 'Optimism', 'Polygon']) {
+    assert.equal(body.directCrypto.some((x) => x.network === network && x.address === '0x7A6F08C684f16B74BE7Ff499bB8A24a4EF3cf66b'), true);
+  }
+  assert.equal(body.x402.payTo, '0xCc34D733F5f387d0128021E636D023472CB5df0c');
   assert.equal(body.fiat.bankTransfer.publicBankDetails, false);
   assert.equal(body.safety.registryAlignedFallbacks, true);
   assert.equal(body.safety.unverifiedNetworksAdvertised, false);
+  assert.equal(body.safety.separateBaseAndGenericEvmReceive, true);
   assert.equal(body.safety.secretsExposed, false);
   const text = JSON.stringify(body).toLowerCase();
   for (const forbidden of ['private_key', 'privatekey', 'mnemonic', 'seed phrase', 'passphrase']) assert.equal(text.includes(forbidden), false);
