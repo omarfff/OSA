@@ -10,7 +10,7 @@ test('payment router exposes broad acceptance but keeps unavailable rails fail c
   assert.deepEqual(status.rails.nowpayments.missing, ['api_key', 'ipn_secret', 'https_callback']);
   assert.equal(status.rails.stripe.status, 'not_configured');
   assert.equal(status.acceptance.directCrypto.some((x) => x.network === 'Solana'), true);
-  assert.equal(status.acceptance.directCrypto.some((x) => x.network === 'TRON'), false);
+  assert.equal(status.acceptance.directCrypto.some((x) => x.network === 'TRON'), true);
   assert.deepEqual(status.settlementPreference, ['USDC', 'USDT', 'BTC']);
 });
 
