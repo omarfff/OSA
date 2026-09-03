@@ -25,9 +25,17 @@ export function paymentOptions() {
   const base = requiredAddr("OSA_BASE_RECEIVE_ADDRESS", DEFAULTS.base);
   const evm = requiredAddr("OSA_EVM_RECEIVE_ADDRESS", DEFAULTS.evm);
   const x402Receive = requiredAddr("OSA_X402_RECEIVE_ADDRESS", DEFAULTS.x402);
-  const solana = requiredAddr("OSA_SOLANA_RECEIVE_ADDRESS", DEFAULTS.solana);
-  const solanaOwnershipProofRef = requiredAddr("OSA_SOLANA_OWNERSHIP_PROOF_REF", DEFAULTS.solanaProof);
+
+  const solanaOverride = optionalAddr("OSA_SOLANA_RECEIVE_ADDRESS");
+  const solanaProofOverride = optionalAddr("OSA_SOLANA_OWNERSHIP_PROOF_REF");
+  const solana = solanaOverride || DEFAULTS.solana;
+  // A proof tied to the canonical default wallet must never be reused for a
+  // different address supplied at runtime.
+  const solanaOwnershipProofRef = solanaOverride
+    ? solanaProofOverride
+    : (solanaProofOverride || DEFAULTS.solanaProof);
   const solanaState = solana && solanaOwnershipProofRef ? "verified_receive" : "ownership_unverified";
+
   const tron = optionalAddr("OSA_TRON_RECEIVE_ADDRESS");
   const tronState = tron ? "configured" : "not_configured";
   const bitcoin = requiredAddr("OSA_BITCOIN_RECEIVE_ADDRESS", DEFAULTS.bitcoin);
@@ -80,6 +88,7 @@ export function paymentOptions() {
       registryAlignedFallbacks: true,
       unverifiedNetworksAdvertised: false,
       separateBaseAndGenericEvmReceive: true,
+      ownershipProofBoundToAddress: true,
       instruction: "Send only an asset listed for the selected network. Transactions sent on an unsupported network may be unrecoverable.",
       secretsExposed: false
     }
