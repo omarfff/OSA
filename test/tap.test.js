@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTapHostedCharge, isTapCaptured, tapMissingConfig, tapRuntimeStatus } from '../src/payments/tap.js';
+import { createTapHostedCharge, isTapCaptured, retrieveTapCharge, tapMissingConfig, tapRuntimeStatus } from '../src/payments/tap.js';
 
 test('Tap stays fail closed until all live merchant fields exist', () => {
   assert.equal(tapRuntimeStatus({}).status, 'not_configured');
@@ -61,6 +61,31 @@ test('creates Tap hosted src_all charge without leaking credentials into request
     amount: 79,
     currency: 'SAR',
   });
+});
+
+test('retrieves Tap charge independently before fulfillment', async () => {
+  const liveKey = ['sk', 'live', 'example'].join('_');
+  let request;
+  const fetchImpl = async (url, options) => {
+    request = { url, options };
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        id: 'chg_lookup123',
+        status: 'CAPTURED',
+        amount: 79,
+        currency: 'SAR',
+        reference: { transaction: 'txn_osa_1', order: 'ord_osa_1' },
+      }),
+    };
+  };
+  const out = await retrieveTapCharge({ chargeId: 'chg_lookup123', secretKey: liveKey, fetchImpl });
+  assert.equal(request.url, 'https://api.tap.company/v2/charges/chg_lookup123');
+  assert.equal(request.options.method, 'GET');
+  assert.equal(out.status, 'CAPTURED');
+  assert.equal(out.orderReference, 'ord_osa_1');
+  assert.equal(isTapCaptured(out), true);
 });
 
 test('Tap live charge requires HTTPS callback URLs and CAPTURED is the only terminal success', async () => {
