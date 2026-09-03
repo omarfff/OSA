@@ -33,17 +33,26 @@ function deepSort(value) {
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, deepSort(value[key])]));
 }
 
+function hasHttpsCallback(value) {
+  try { return new URL(String(value || '')).protocol === 'https:'; }
+  catch { return false; }
+}
+
 export function canonicalNowPaymentsPayload(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('NOWPAYMENTS_INVALID_IPN_PAYLOAD');
   return JSON.stringify(deepSort(payload));
 }
 
+export function nowPaymentsMissingConfig(env = process.env) {
+  const missing = [];
+  if (!String(env.NOWPAYMENTS_API_KEY || '').trim()) missing.push('api_key');
+  if (!String(env.NOWPAYMENTS_IPN_SECRET || '').trim()) missing.push('ipn_secret');
+  if (!hasHttpsCallback(env.NOWPAYMENTS_CALLBACK_URL)) missing.push('https_callback');
+  return missing;
+}
+
 export function nowPaymentsReady(env = process.env) {
-  return Boolean(
-    String(env.NOWPAYMENTS_API_KEY || '').trim()
-    && String(env.NOWPAYMENTS_IPN_SECRET || '').trim()
-    && String(env.NOWPAYMENTS_CALLBACK_URL || '').trim(),
-  );
+  return nowPaymentsMissingConfig(env).length === 0;
 }
 
 export function verifyNowPaymentsIpn(payload, signature, secret = process.env.NOWPAYMENTS_IPN_SECRET) {
@@ -65,6 +74,35 @@ export function isNowPaymentsFinished(payload) {
     && Number.isFinite(Number(payload.actually_paid))
     && Number(payload.actually_paid) > 0,
   );
+}
+
+export async function listNowPaymentsCurrencies({
+  apiKey = process.env.NOWPAYMENTS_API_KEY,
+  baseUrl = process.env.NOWPAYMENTS_BASE_URL || DEFAULT_BASE_URL,
+  timeoutMs = 10_000,
+  fetchImpl = globalThis.fetch,
+} = {}) {
+  const key = String(apiKey || '').trim();
+  if (!key) throw new Error('NOWPAYMENTS_API_KEY_REQUIRED');
+  if (typeof fetchImpl !== 'function') throw new Error('NOWPAYMENTS_FETCH_REQUIRED');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(250, Math.min(Number(timeoutMs) || 10_000, 30_000)));
+  try {
+    const response = await fetchImpl(`${httpsBaseUrl(baseUrl)}/currencies`, {
+      method: 'GET',
+      headers: { 'x-api-key': key, accept: 'application/json' },
+      signal: controller.signal,
+    });
+    const raw = await response.text();
+    let data;
+    try { data = raw ? JSON.parse(raw) : {}; } catch { throw new Error('NOWPAYMENTS_INVALID_JSON_RESPONSE'); }
+    if (!response.ok) throw new Error(`NOWPAYMENTS_HTTP_${response.status}`);
+    const currencies = Array.isArray(data.currencies) ? data.currencies : [];
+    return [...new Set(currencies.map((x) => currencyCode(x)).filter(Boolean))].sort();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function createNowPayment({
