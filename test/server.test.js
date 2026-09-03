@@ -5,6 +5,7 @@ import { once } from 'node:events';
 process.env.VERCEL = '1';
 process.env.OSA_INGEST_KEY = 'test-key';
 delete process.env.OSA_PAY_TO;
+delete process.env.OSA_TRON_RECEIVE_ADDRESS;
 const { default: app } = await import('../src/server.js');
 const server = app.listen(0, '127.0.0.1');
 await once(server, 'listening');
@@ -29,19 +30,24 @@ test('rejects invalid history limit and max price', async () => {
   assert.equal((await fetch(`${base}/best?max_price=-1`)).status, 400);
 });
 
-test('payment options expose public receive rails without secrets', async () => {
+test('payment options expose only registry-aligned public receive rails without secrets', async () => {
   const response = await fetch(`${base}/payment-options`);
   assert.equal(response.status, 200);
   const body = await response.json();
+  assert.equal(body.version, 3);
   assert.equal(body.preferred.humanStablecoin.network, 'Base');
   assert.equal(body.preferred.humanStablecoin.asset, 'USDC');
-  assert.equal(body.preferred.humanStablecoin.address, '0x04e8930d13A6f6A258aA1488eeFa500ca8Cd9ebB');
+  assert.equal(body.preferred.humanStablecoin.address, '0x559FbeCe1e1517d5cb0eD9FcB6D3383D58cf48d4');
   assert.equal(body.solana.status, 'not_configured');
   assert.equal(body.solana.address, null);
+  assert.equal(body.tron.status, 'not_configured');
+  assert.equal(body.tron.address, null);
   assert.equal(body.directCrypto.some((x) => x.network === 'Solana'), false);
-  assert.equal(body.directCrypto.some((x) => x.network === 'TRON' && x.address === 'TXzMju2v6QoevWaMkPaSwEuN6HbFibWW7o'), true);
-  assert.equal(body.directCrypto.some((x) => x.network === 'Bitcoin' && x.address === 'bc1qpg5zxqps9038vfgpjganvrf5pvq8ykk29ft9eq'), true);
+  assert.equal(body.directCrypto.some((x) => x.network === 'TRON'), false);
+  assert.equal(body.directCrypto.some((x) => x.network === 'Bitcoin' && x.address === 'bc1qzxqxvp9nauw673cdjfj083hasxwvn7uwzqgahm'), true);
   assert.equal(body.fiat.bankTransfer.publicBankDetails, false);
+  assert.equal(body.safety.registryAlignedFallbacks, true);
+  assert.equal(body.safety.unverifiedNetworksAdvertised, false);
   assert.equal(body.safety.secretsExposed, false);
   const text = JSON.stringify(body).toLowerCase();
   for (const forbidden of ['private_key', 'privatekey', 'mnemonic', 'seed phrase', 'passphrase']) assert.equal(text.includes(forbidden), false);
