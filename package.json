@@ -9,6 +9,7 @@
     "test": "node --test",
     "chaos": "node scripts/chaos.mjs",
     "lead:audit": "node tools/lead-leakage-audit.mjs",
+    "mcp:preflight": "node tools/mcp-preflight.mjs",
     "browser:chaos": "node scripts/browser-chaos.mjs",
     "browser:health": "node tools/osa-browser-runtime.mjs health",
     "revenue:gate": "node tools/revenue-gate.mjs"
