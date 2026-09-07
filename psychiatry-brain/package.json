@@ -4,6 +4,6 @@
   "type": "module",
   "scripts": {
     "context": "node src/context.mjs",
-    "test": "node --test test/context.test.mjs"
+    "test": "node --test test/*.test.mjs"
   }
 }
