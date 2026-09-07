@@ -1,0 +1,9 @@
+{
+  "name": "osa-psychiatry-study-brain",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "context": "node src/context.mjs",
+    "test": "node --test test/context.test.mjs"
+  }
+}
