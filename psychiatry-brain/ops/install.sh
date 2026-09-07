@@ -51,6 +51,8 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
@@ -63,6 +65,7 @@ IPAddressDeny=any
 IPAddressAllow=localhost
 ReadOnlyPaths=/usr/local/lib/osa-psychiatry /usr/local/share/osa-psychiatry
 ReadWritePaths=/var/lib/osa-psychiatry-brain
+InaccessiblePaths=-/usr/local/share/osa-brain -/var/lib/osa-brain -/opt/osa/gitops/OSA/knowledge -/opt/osa/workspace -/opt/osa-laborx-v2 -/opt/osa-swarm
 UMask=0077
 
 [Install]
@@ -71,6 +74,7 @@ UNITEOF
 
 systemctl daemon-reload
 systemctl enable --now osa-psychiatry-brain.service
+systemctl restart osa-psychiatry-brain.service
 sleep 2
 systemctl is-active --quiet osa-psychiatry-brain.service
 curl -fsS --max-time 10 http://127.0.0.1:8791/health
