@@ -13,6 +13,8 @@ This directory is an intentionally isolated knowledge domain for Dr. Omar Saad A
 - Voice OSCE does not persist raw audio and does not use voice features as stand-alone medical or personality inference.
 - Full Live OSCE stores only graded educational performance in the durable mastery map; interview/viva transcripts remain memory-only.
 - Uploaded/extracted guideline or textbook source text used for document simulation is request-scoped and is not written into learner state or knowledge files.
+- Evidence excerpts, de-identified case text, learner drafts, generated notes, and Consultant Mode dialogue are request-scoped and are not persisted by the new training engines.
+- The VPS remains network-isolated. Current external evidence retrieval happens in an authorized ChatGPT/client/plugin layer and only bounded source excerpts are passed into Psychiatry Brain.
 
 ## Purpose
 
@@ -32,6 +34,9 @@ The Psychiatry Study Brain is designed to support:
 12. Voice-ready OSCE delivery and learner communication coaching.
 13. Full Live timed OSCE with dynamic actor interaction, bell/timeout, post-station viva, and automatic mastery updates.
 14. Source-grounded conversion of uploaded guideline/textbook chapters into high-yield summaries and difficult Egyptian Fellowship/Board simulation questions.
+15. Evidence-based clinical reasoning with source hierarchy, patient modifiers, safety/monitoring, uncertainty, and auditable evidence trails.
+16. Psychiatric documentation and 4Ps formulation training with source-faithfulness audits and learner-draft comparison.
+17. Consultant-style oral defence that challenges one decision at a time with: `What evidence supports your decision?`
 
 ## Learning style
 
@@ -46,6 +51,45 @@ The adaptive server implements:
 Tracked domains include MSE, risk, formulation, psychosis, mood, anxiety/OCD/trauma, addiction, child/adolescent, geriatric psychiatry, psychopharmacology, emergency psychiatry, psychotherapy, and law/ethics.
 
 The learner state stores only educational performance fields such as correctness, graded score, confidence, mastery, streak, and next review time. It does not store patient narratives.
+
+## Evidence-Based Clinical Reasoning
+
+The evidence engine implements:
+
+`case facts -> focused clinical question -> evidence hierarchy -> patient modifiers -> recommendation -> alternatives -> safety/monitoring -> uncertainty -> evidence trail -> consultant viva`
+
+Evidence sources are supplied as bounded structured excerpts. Supported source classes are `regulatory`, `guideline`, `local_protocol`, `systematic_review`, `primary_study`, `textbook`, and `other`. The engine ranks the supplied sources for navigation, but does not invent freshness, authority, doses, contraindications, thresholds, interactions, or monitoring rules.
+
+If no external evidence excerpt is supplied, the result explicitly sets `externalEvidenceRequired: true`. Local Psychiatry Brain knowledge can still be used as a learning scaffold, but current high-stakes clinical claims must be verified against an authoritative current source.
+
+The engine deliberately does **not** expose hidden chain-of-thought. It teaches an auditable rationale: documented patient facts, what each source supports, why the recommendation is conditional, alternatives, safety/monitoring, conflicts, and unresolved uncertainty.
+
+## Documentation & Formulation Lab
+
+The documentation engine implements:
+
+`source transcript/notes -> structured psychiatric note -> source evidence audit -> MSE category audit -> risk-gap audit -> 4Ps quality audit -> learner-vs-model comparison -> rewrite priorities`
+
+Supported note formats are `full_psychiatric`, `soap`, and `board_case`. Supported source kinds are `fictional_transcript`, `deidentified_transcript`, and `deidentified_case_notes`.
+
+Core truth rules:
+
+- absence of documentation is not a negative finding;
+- patient report, collateral report, and direct observation are different evidence classes;
+- MSE must not infer appearance, rapport, affect, insight, cognition, psychosis, suicidality, or capacity from silence;
+- differential diagnosis and 4Ps formulation are interpretations, not source facts;
+- unsupported predisposing, precipitating, perpetuating, or protective factors are labeled insufficient rather than invented;
+- raw audio, source text, learner draft, generated note, and audit text are not persisted.
+
+The preferred educational workflow is learner-first: the resident writes a draft, then the AI creates an independent structured note and audits both against the same source.
+
+## Consultant Mode
+
+Consultant Mode is stateless and uses two steps:
+
+`learner commits to decision -> one hard challenge -> learner defends -> source-linked formative feedback -> one harder next challenge`
+
+The challenge targets the highest-value weakness: diagnostic justification, dangerous differential, risk, contraindication, interaction, renal/hepatic modifier, monitoring, capacity/law, alternative treatment, or evidence quality. When no current external evidence is supplied, the consultant asks what authoritative source needs verification rather than fabricating a current recommendation.
 
 ## OSCE / roleplay loop
 
@@ -104,7 +148,9 @@ Supported formats: `sba`, `viva`, and `mixed`.
 
 `src/context.mjs` loads only this directory's knowledge files.
 
-`src/adaptive-server.mjs` is the default service entry point and keeps the original `/ask` behavior while adding adaptive learning, OSCE, Voice OSCE, Full Live OSCE, and document-simulation endpoints.
+`src/adaptive-server.mjs` preserves the existing adaptive learning, OSCE, Voice OSCE, Full Live OSCE, and document-simulation behavior.
+
+`src/training-server.mjs` is the default service entry point. It wraps the adaptive server without replacing its existing routes, and adds EBP reasoning, documentation/formulation, Consultant Mode, and training capability endpoints.
 
 Run:
 
@@ -116,10 +162,15 @@ npm start
 
 ### API
 
-- `GET /health` - isolated service and capability status.
+- `GET /health` - existing isolated adaptive service and capability status.
+- `GET /training/capabilities` - EBP/documentation/consultant capability and persistence contract.
 - `POST /ask` - normal psychiatry-only question answering.
 - `POST /study` - adaptive study modes: `adaptive`, `diagnostic`, `teach`, `viva`, `mcq`, `review`, `case`.
 - `POST /documents/simulate` - convert extracted study-file text into a grounded summary plus difficult simulation questions.
+- `POST /reasoning/evidence` - run the Evidence-Based Clinical Reasoning pipeline over a de-identified/fictional case and bounded evidence excerpts.
+- `POST /documentation/formulate` - create a source-faithful psychiatric note and evidence/formulation audit, optionally compared with a learner draft.
+- `POST /consultant/challenge` - ask exactly one senior-level challenge after the learner commits to a decision.
+- `POST /consultant/feedback` - grade the learner's defence against case facts and supplied evidence and return one harder next challenge.
 - `POST /progress/attempt` - record binary or graded performance metadata for one skill.
 - `GET /progress` - mastery map, due reviews, and next weak domain.
 - `GET /osce/stations` - list public OSCE station stems without hidden case profiles or rubrics.
@@ -135,6 +186,54 @@ npm start
 - `POST /osce/live/viva/start` - submit candidate summary and receive first of three viva questions.
 - `POST /osce/live/viva/answer` - answer the current viva question and receive the next one.
 - `POST /osce/live/finalize` - final marking, automatic mastery-map update, and deletion of in-memory session data.
+
+Example Evidence-Based Clinical Reasoning request:
+
+```json
+{
+  "caseText": "De-identified patient with severe depression and chronic kidney disease...",
+  "question": "Which antidepressant strategy is most appropriate given renal impairment?",
+  "evidenceSources": [
+    {
+      "title": "Current guideline excerpt",
+      "type": "guideline",
+      "authority": "NICE",
+      "date": "current verified date",
+      "text": "<bounded relevant excerpt>"
+    }
+  ],
+  "language": "bilingual"
+}
+```
+
+Example Documentation Lab request:
+
+```json
+{
+  "sourceKind": "deidentified_case_notes",
+  "sourceText": "<de-identified case material>",
+  "learnerDraft": "<learner's first draft>",
+  "format": "board_case",
+  "language": "bilingual"
+}
+```
+
+Example Consultant challenge request:
+
+```json
+{
+  "caseText": "<de-identified or fictional case>",
+  "learnerDecision": "My diagnosis and management decision is...",
+  "evidenceSources": [
+    {
+      "title": "Guideline excerpt",
+      "type": "guideline",
+      "text": "<bounded evidence>"
+    }
+  ],
+  "difficulty": "board"
+}
+```
 
 Example document simulation request:
 
