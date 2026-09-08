@@ -32,7 +32,8 @@ if ! id "$HARVEST_USER" >/dev/null 2>&1; then
   useradd --system --home-dir "$CASE_DIR" --shell /usr/sbin/nologin --gid "$CASE_GROUP" "$HARVEST_USER"
 fi
 
-install -d -o root -g "$SERVICE_USER" -m 0750 "$LIB_DIR" "$SHARE_DIR" "$KNOWLEDGE_DIR"
+install -d -o root -g root -m 0755 "$LIB_DIR"
+install -d -o root -g "$SERVICE_USER" -m 0750 "$SHARE_DIR" "$KNOWLEDGE_DIR"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 "$STATE_DIR"
 install -d -o "$HARVEST_USER" -g "$CASE_GROUP" -m 0750 "$CASE_DIR"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/server.mjs" "$LIB_DIR/server.mjs"
