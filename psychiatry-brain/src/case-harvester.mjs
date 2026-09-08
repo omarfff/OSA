@@ -60,7 +60,7 @@ export function classifyCaseDomains(text) {
 
 export function normalizeEuropePmcCase(item) {
   const title = stripMarkup(item?.title);
-  const abstract = stripMarkup(item?.authorManuscript || item?.abstractText || item?.abstract || '');
+  const abstract = stripMarkup(item?.abstractText || item?.abstract || '');
   const pmcid = String(item?.pmcid || '').trim();
   const pmid = String(item?.pmid || item?.id || '').trim();
   const doi = String(item?.doi || '').trim();
