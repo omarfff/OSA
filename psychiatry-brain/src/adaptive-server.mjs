@@ -13,6 +13,7 @@ import {
   canonicalDomain,
   parseMasteryLine
 } from './live-osce.mjs';
+import { generateDocumentSimulationBundle } from './document-simulation.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, '..');
@@ -21,6 +22,7 @@ const DEFAULT_PORT = Number(process.env.PSYCHIATRY_BRAIN_PORT || 8791);
 const DEFAULT_STATE_DIR = process.env.PSYCHIATRY_BRAIN_STATE_DIR || path.join(ROOT, 'state');
 const OLLAMA_URL = process.env.PSYCHIATRY_OLLAMA_URL || 'http://127.0.0.1:11434';
 const MAX_BODY = 64 * 1024;
+const MAX_DOCUMENT_BODY = 220 * 1024;
 
 function validateLoopback(urlText) {
   const url = new URL(urlText);
@@ -29,12 +31,12 @@ function validateLoopback(urlText) {
   return url.origin;
 }
 
-async function readJson(req) {
+async function readJson(req, maxBody = MAX_BODY) {
   let size = 0;
   const parts = [];
   for await (const part of req) {
     size += part.length;
-    if (size > MAX_BODY) throw new Error('request_too_large');
+    if (size > maxBody) throw new Error('request_too_large');
     parts.push(part);
   }
   if (!parts.length) return {};
@@ -149,6 +151,11 @@ export function createAdaptivePsychiatryServer({
           liveOsceViva: true,
           liveOsceMasteryAutoUpdate: true,
           dynamicActorInteraction: true,
+          documentSimulation: true,
+          documentSimulationFormats: ['sba', 'viva', 'mixed'],
+          documentInput: 'extracted_text_from_pdf_or_file',
+          documentSourcePersisted: false,
+          generatedQuestionsPersisted: false,
           voiceOsceCapabilities,
           osceStations: listStations().length,
           patientNarrativesPersisted: false,
@@ -387,6 +394,14 @@ export function createAdaptivePsychiatryServer({
         return;
       }
 
+      if (req.method === 'POST' && req.url === '/documents/simulate') {
+        const body = await readJson(req, MAX_DOCUMENT_BODY);
+        const bundle = await generateDocumentSimulationBundle(body, { ask });
+        res.statusCode = 200;
+        res.end(JSON.stringify({ ok: true, ...bundle }));
+        return;
+      }
+
       if (req.method === 'GET' && req.url?.startsWith('/progress')) {
         const state = await store.load();
         res.statusCode = 200;
@@ -467,6 +482,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       osceRoleplay: true,
       voiceOsce: true,
       liveOsce: true,
+      documentSimulation: true,
+      documentSourcePersisted: false,
+      generatedQuestionsPersisted: false,
       patientNarrativesPersisted: false,
       osceTranscriptsPersisted: false,
       rawAudioPersisted: false

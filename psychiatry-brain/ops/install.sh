@@ -25,6 +25,7 @@ install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/learning.mjs" "$LIB_DIR
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/osce.mjs" "$LIB_DIR/osce.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/voice-osce.mjs" "$LIB_DIR/voice-osce.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/live-osce.mjs" "$LIB_DIR/live-osce.mjs"
+install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/document-simulation.mjs" "$LIB_DIR/document-simulation.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/adaptive-server.mjs" "$LIB_DIR/adaptive-server.mjs"
 
 find "$KNOWLEDGE_DIR" -maxdepth 1 -type f -name '*.md' -delete
