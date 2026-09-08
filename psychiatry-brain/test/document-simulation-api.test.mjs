@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { LearnerStore } from '../src/learning.mjs';
@@ -51,8 +51,11 @@ test('document simulation API returns grounded bundle without writing source int
   assert.equal(response.json.questionsPersisted, false);
   assert.equal(response.json.questionBatches.reduce((n, x) => n + x.count, 0), 10);
 
-  await store.load();
-  const statePath = path.join(stateDir, 'learner-state.json');
-  const persisted = await readFile(statePath, 'utf8');
-  assert.doesNotMatch(persisted, new RegExp(secretMarker));
+  const entries = await readdir(stateDir);
+  if (entries.includes('learner-state.json')) {
+    const persisted = await readFile(path.join(stateDir, 'learner-state.json'), 'utf8');
+    assert.doesNotMatch(persisted, new RegExp(secretMarker));
+  } else {
+    assert.equal(entries.length, 0);
+  }
 });
