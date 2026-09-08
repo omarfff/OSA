@@ -6,9 +6,11 @@ import { createAdaptivePsychiatryServer } from './adaptive-server.mjs';
 import { generateEvidenceReasoningBundle } from './evidence-reasoning.mjs';
 import { generateDocumentationLabBundle } from './documentation-lab-v2.mjs';
 import { generateConsultantChallenge, generateConsultantFeedback } from './consultant-mode.mjs';
+import { caseCorpusStats, generateUnknownPublishedCase, revealPublishedCase } from './case-corpus.mjs';
 
 const DEFAULT_BIND = process.env.PSYCHIATRY_BRAIN_BIND || '127.0.0.1';
 const DEFAULT_PORT = Number(process.env.PSYCHIATRY_BRAIN_PORT || 8791);
+const DEFAULT_CASE_DIR = process.env.PSYCHIATRY_CASE_CORPUS_DIR || '/var/lib/osa-psychiatry-cases';
 const MAX_TRAINING_BODY = 220 * 1024;
 
 async function readJson(req, maxBody = MAX_TRAINING_BODY) {
@@ -26,6 +28,7 @@ async function readJson(req, maxBody = MAX_TRAINING_BODY) {
 function statusForError(err) {
   const message = String(err?.message || err);
   if (/_(required|invalid|too_long|too_large)$/.test(message) || message === 'too_many_evidence_sources' || message === 'request_too_large') return 400;
+  if (message === 'case_not_found' || message === 'case_corpus_no_match') return 404;
   if (message.startsWith('unsafe_scope_drift:')) return 422;
   return 500;
 }
@@ -45,17 +48,29 @@ export const trainingCapabilities = Object.freeze({
   documentationFormats: ['full_psychiatric', 'soap', 'board_case'],
   consultantMode: true,
   consultantDifficulty: ['r1', 'board', 'consultant'],
+  globalPublishedCaseCorpus: true,
+  globalCaseCorpusSource: 'Europe PMC open-access case reports',
+  globalCaseCorpusInitialTarget: 1000,
+  unknownCaseMode: true,
+  publishedCaseDebrief: true,
   sourceHierarchy: ['regulatory', 'guideline', 'local_protocol', 'systematic_review', 'primary_study', 'textbook', 'other'],
   rawAudioPersisted: false,
   caseTextPersisted: false,
   evidenceTextPersisted: false,
   generatedNotesPersisted: false,
   consultantTranscriptsPersisted: false,
+  unknownCaseVignettesPersisted: false,
   externalNetworkRetrievalInsideVps: false,
+  caseHarvesterNetworkSeparatedFromBrain: true,
   retrievalContract: 'ChatGPT/client retrieves current authorized evidence and sends bounded source excerpts; isolated VPS reasons over supplied evidence.'
 });
 
-export function createTrainingPsychiatryServer({ bind = DEFAULT_BIND, port = DEFAULT_PORT, ask = askPsychiatryBrain } = {}) {
+export function createTrainingPsychiatryServer({
+  bind = DEFAULT_BIND,
+  port = DEFAULT_PORT,
+  ask = askPsychiatryBrain,
+  caseDir = DEFAULT_CASE_DIR
+} = {}) {
   if (!['127.0.0.1', '::1', 'localhost'].includes(String(bind).toLowerCase())) throw new Error('brain_bind_must_be_loopback');
 
   const adaptive = createAdaptivePsychiatryServer({ bind, port, ask });
@@ -66,6 +81,26 @@ export function createTrainingPsychiatryServer({ bind = DEFAULT_BIND, port = DEF
     try {
       if (req.method === 'GET' && req.url === '/training/capabilities') {
         send(res, 200, { ok: true, isolated: true, ...trainingCapabilities });
+        return;
+      }
+
+      if (req.method === 'GET' && req.url === '/cases/corpus/stats') {
+        const stats = await caseCorpusStats(caseDir);
+        send(res, 200, { ok: true, ...stats });
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/cases/random') {
+        const body = await readJson(req);
+        const result = await generateUnknownPublishedCase(body, { ask, caseDir });
+        send(res, 200, { ok: true, ...result });
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/cases/reveal') {
+        const body = await readJson(req);
+        const result = await revealPublishedCase(body, { ask, caseDir });
+        send(res, 200, { ok: true, ...result });
         return;
       }
 
@@ -115,7 +150,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       isolated: true,
       evidenceBasedReasoning: true,
       documentationFormulationLab: true,
-      consultantMode: true
+      consultantMode: true,
+      globalPublishedCaseCorpus: true,
+      unknownCaseMode: true
     }) + '\n');
   });
 }
