@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { askPsychiatryBrain } from './server.mjs';
 import { createAdaptivePsychiatryServer } from './adaptive-server.mjs';
 import { generateEvidenceReasoningBundle } from './evidence-reasoning.mjs';
-import { generateDocumentationLabBundle } from './documentation-lab.mjs';
+import { generateDocumentationLabBundle } from './documentation-lab-v2.mjs';
 import { generateConsultantChallenge, generateConsultantFeedback } from './consultant-mode.mjs';
 
 const DEFAULT_BIND = process.env.PSYCHIATRY_BRAIN_BIND || '127.0.0.1';
@@ -41,6 +41,7 @@ export const trainingCapabilities = Object.freeze({
   evidenceInput: 'structured_source_excerpts',
   hiddenChainOfThoughtExposed: false,
   documentationFormulationLab: true,
+  documentationLongSourceChunking: true,
   documentationFormats: ['full_psychiatric', 'soap', 'board_case'],
   consultantMode: true,
   consultantDifficulty: ['r1', 'board', 'consultant'],
