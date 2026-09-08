@@ -5,6 +5,14 @@ import { askPsychiatryBrain, loadStudyKnowledge } from './server.mjs';
 import { LearnerStore, dueReviews, masterySummary, pickAdaptiveDomain } from './learning.mjs';
 import { OsceSessionStore, buildActorTask, buildExaminerTask, listStations, osceMetadata } from './osce.mjs';
 import { VoiceOsceStore, actorDelivery, sanitizeVoiceObservation, describeLearnerVoice, voiceExaminerContext, voiceOsceCapabilities } from './voice-osce.mjs';
+import {
+  LiveOsceStore,
+  actorAdaptationDirective,
+  buildVivaQuestionTask,
+  buildLiveFinalAssessmentTask,
+  canonicalDomain,
+  parseMasteryLine
+} from './live-osce.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, '..');
@@ -37,6 +45,26 @@ function cleanTopic(value) {
   const topic = String(value || '').trim();
   if (topic.length > 180) throw new Error('topic_too_long');
   return topic;
+}
+
+function parseVivaQuestions(text) {
+  const rows = String(text || '')
+    .split('\n')
+    .map((x) => x.replace(/^\s*(?:\d+[.)]|[-*])\s*/, '').trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  if (rows.length === 3) return rows;
+  return [
+    'What is your leading diagnosis and the most important differentials?',
+    'What additional assessment or investigations are required and why?',
+    'What is your immediate management and safety plan, including law or capacity issues if relevant?'
+  ];
+}
+
+function difficultyNumber(value) {
+  if (value === 'board') return 5;
+  if (value === 'r1') return 3;
+  return 2;
 }
 
 export function buildStudyTask({ mode = 'adaptive', topic = '', state, now = new Date() } = {}) {
@@ -80,12 +108,17 @@ function deliveryTaskSuffix(session) {
   return `\n\nVOICE-ACTOR DELIVERY TARGET (content still governed by the hidden station profile): rate=${delivery.rate}; volume=${delivery.volume}; prosody=${delivery.prosody}; response latency target=${delivery.latencyMs}ms; interruptions=${delivery.interruptions}. Performance note: ${delivery.notes}. Do not mention these directions in the spoken reply.`;
 }
 
+function liveAdaptationSuffix(adaptation) {
+  return `\n\nDYNAMIC INTERACTION STATE: cooperation=${adaptation.state.cooperation}; guardedness=${adaptation.state.guardedness}; irritation=${adaptation.state.irritation}. Adapt delivery only: ${adaptation.directive}. Never alter the hidden clinical facts, diagnosis, risk facts, medication history, investigations, or timeline because of this interaction state.`;
+}
+
 export function createAdaptivePsychiatryServer({
   bind = DEFAULT_BIND,
   port = DEFAULT_PORT,
   store = new LearnerStore(DEFAULT_STATE_DIR),
   osceStore = new OsceSessionStore(),
   voiceStore = new VoiceOsceStore(),
+  liveStore = new LiveOsceStore(),
   ask = askPsychiatryBrain
 } = {}) {
   if (!['127.0.0.1', '::1', 'localhost'].includes(String(bind).toLowerCase())) throw new Error('brain_bind_must_be_loopback');
@@ -111,6 +144,11 @@ export function createAdaptivePsychiatryServer({
           adaptiveLearning: true,
           osceRoleplay: true,
           voiceOsce: true,
+          liveOsce: true,
+          liveOsceTimingMinutes: { min: 7, default: 8, max: 10 },
+          liveOsceViva: true,
+          liveOsceMasteryAutoUpdate: true,
+          dynamicActorInteraction: true,
           voiceOsceCapabilities,
           osceStations: listStations().length,
           patientNarrativesPersisted: false,
@@ -206,6 +244,149 @@ export function createAdaptivePsychiatryServer({
         return;
       }
 
+      if (req.method === 'POST' && req.url === '/osce/live/start') {
+        const body = await readJson(req);
+        const publicOsce = osceStore.start({ stationId: body.stationId || 'random', difficulty: body.difficulty || 'r1' });
+        const osce = osceStore.get(publicOsce.sessionId);
+        voiceStore.start(osce.id, osce.station.id);
+        const live = liveStore.start({ osceSession: osce, durationMinutes: body.durationMinutes });
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+          ok: true,
+          station: publicOsce.station,
+          opening: publicOsce.station.opening,
+          actorDelivery: actorDelivery(osce.station.id),
+          live,
+          instructions: 'Interview the actor until the bell. Then submit a concise summary to start viva.'
+        }));
+        return;
+      }
+
+      if (req.method === 'GET' && req.url?.startsWith('/osce/live/status')) {
+        const url = new URL(req.url, `http://${DEFAULT_BIND}:${DEFAULT_PORT}`);
+        const liveSessionId = url.searchParams.get('sessionId');
+        const live = liveStore.get(liveSessionId);
+        res.statusCode = 200;
+        res.end(JSON.stringify({ ok: true, live: liveStore.publicState(live) }));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/osce/live/turn') {
+        const body = await readJson(req);
+        const live = liveStore.assertInterviewOpen(body.liveSessionId);
+        let message = String(body.message || '').trim();
+        let voicePacket = null;
+        let liveMetrics = {};
+        if (body.transcript != null) {
+          voicePacket = sanitizeVoiceObservation(body);
+          message = voicePacket.transcript;
+          voiceStore.append(live.osceSessionId, voicePacket);
+          liveMetrics = {
+            wordsPerMinute: voicePacket.observed.wordsPerMinute,
+            pauseRatio: voicePacket.observed.pauseRatio,
+            meanResponseLatencyMs: voicePacket.observed.responseLatencyMs,
+            interruptions: voicePacket.observed.interruptionCount
+          };
+          liveStore.recordVoiceProcess(live.id, liveMetrics);
+        }
+        if (!message) throw new Error('message_required');
+        const osce = osceStore.appendLearner(live.osceSessionId, message);
+        const adaptation = actorAdaptationDirective(live, liveMetrics);
+        const task = buildActorTask(osce) + deliveryTaskSuffix(osce) + liveAdaptationSuffix(adaptation);
+        const answer = await ask({ task, context: 'Full Live fictional psychiatry OSCE. Keep hidden clinical facts stable. Dynamic behavior may change only interaction style. Voice process is coaching data, never diagnostic evidence.' });
+        osceStore.appendActor(osce.id, answer.text);
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+          ok: true,
+          reply: answer.text,
+          actorDelivery: actorDelivery(osce.station.id),
+          interaction: adaptation,
+          learnerVoiceObservation: voicePacket ? describeLearnerVoice(voicePacket.observed) : null,
+          live: liveStore.publicState(liveStore.get(live.id)),
+          rawAudioPersisted: false,
+          transcriptPersisted: false
+        }));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/osce/live/close') {
+        const body = await readJson(req);
+        const live = liveStore.closeInterview(body.liveSessionId);
+        res.statusCode = 200;
+        res.end(JSON.stringify({ ok: true, live, bell: true }));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/osce/live/viva/start') {
+        const body = await readJson(req);
+        liveStore.closeInterview(body.liveSessionId);
+        const live = liveStore.get(body.liveSessionId);
+        const summary = String(body.summary || '').trim();
+        if (!summary) throw new Error('summary_required');
+        live.candidateSummary = summary;
+        const task = buildVivaQuestionTask(live);
+        const answer = await ask({ task, context: 'Generate only post-station viva questions for a fictional psychiatry OSCE. No answers, no hidden-profile disclosure.' });
+        const questions = parseVivaQuestions(answer.text);
+        const state = liveStore.beginViva(live.id, summary, questions);
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+          ok: true,
+          live: state,
+          question: questions[0],
+          totalQuestions: questions.length
+        }));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/osce/live/viva/answer') {
+        const body = await readJson(req);
+        const result = liveStore.answerViva(body.liveSessionId, body.answer);
+        res.statusCode = 200;
+        res.end(JSON.stringify({ ok: true, ...result }));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/osce/live/finalize') {
+        const body = await readJson(req);
+        const live = liveStore.get(body.liveSessionId);
+        if (live.stage !== 'viva') throw new Error('live_osce_viva_not_ready');
+        if (live.vivaQuestions?.length && live.viva.length < live.vivaQuestions.length) throw new Error('live_osce_viva_incomplete');
+        const osce = osceStore.get(live.osceSessionId);
+        const baseTask = buildExaminerTask(osce, live.candidateSummary || '');
+        const task = buildLiveFinalAssessmentTask(live, baseTask);
+        const answer = await ask({ task, context: 'Final formative Full Live psychiatry OSCE assessment. Voice measures are communication-process observations only. Return the requested MASTERY JSON line.' });
+        const allowedDomains = (osce.station.domains || []).map(canonicalDomain);
+        const mastery = parseMasteryLine(answer.text, allowedDomains);
+        const skill = `osce_${osce.station.id.replace(/-/g, '_')}`;
+        let state = await store.load();
+        for (const [domain, scorePct] of Object.entries(mastery)) {
+          state = await store.record({
+            domain,
+            skill,
+            scorePct,
+            difficulty: difficultyNumber(osce.difficulty)
+          });
+        }
+        const voiceSummary = voiceStore.summary(osce.id);
+        osceStore.finish(osce.id);
+        voiceStore.finish(osce.id);
+        const finishedLive = liveStore.finalize(live.id);
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+          ok: true,
+          station: finishedLive.station.title,
+          formative: true,
+          feedback: answer.text,
+          masteryApplied: mastery,
+          masterySummary: masterySummary(state),
+          voiceCommunication: voiceSummary,
+          bell: finishedLive.bell,
+          transcriptPersisted: false,
+          rawAudioPersisted: false
+        }));
+        return;
+      }
+
       if (req.method === 'GET' && req.url?.startsWith('/progress')) {
         const state = await store.load();
         res.statusCode = 200;
@@ -224,6 +405,7 @@ export function createAdaptivePsychiatryServer({
           domain: body.domain,
           skill: body.skill,
           correct: body.correct,
+          scorePct: body.scorePct,
           confidence: body.confidence,
           difficulty: body.difficulty,
           responseMs: body.responseMs
@@ -265,7 +447,7 @@ export function createAdaptivePsychiatryServer({
       res.end(JSON.stringify({ ok: false, error: 'not_found' }));
     } catch (err) {
       const message = String(err?.message || err);
-      const badRequest = /(?:required|invalid|not_allowed|too_long|request_too_large|not_found|turn_limit)/.test(message);
+      const badRequest = /(?:required|invalid|not_allowed|too_long|request_too_large|not_found|turn_limit|closed|not_ready|incomplete|complete)/.test(message);
       res.statusCode = badRequest ? 400 : 500;
       res.end(JSON.stringify({ ok: false, error: message }));
     }
@@ -284,6 +466,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       adaptiveLearning: true,
       osceRoleplay: true,
       voiceOsce: true,
+      liveOsce: true,
       patientNarrativesPersisted: false,
       osceTranscriptsPersisted: false,
       rawAudioPersisted: false

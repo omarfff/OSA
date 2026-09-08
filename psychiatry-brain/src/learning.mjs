@@ -53,14 +53,19 @@ export function sanitizeAttempt(input = {}) {
   const domain = assertToken(input.domain, 'domain');
   const skill = assertToken(input.skill || 'general', 'skill');
   if (!DEFAULT_DOMAINS.includes(domain)) throw new Error('domain_not_allowed');
-  if (typeof input.correct !== 'boolean') throw new Error('correct_required');
+
+  const scorePct = input.scorePct == null ? null : clamp(Number(input.scorePct), 0, 100);
+  if (scorePct != null && !Number.isFinite(scorePct)) throw new Error('score_pct_invalid');
+  if (typeof input.correct !== 'boolean' && scorePct == null) throw new Error('correct_or_score_required');
+  const correct = typeof input.correct === 'boolean' ? input.correct : scorePct >= 60;
+
   const confidence = input.confidence == null ? null : clamp(Number(input.confidence), 0, 100);
   if (confidence != null && !Number.isFinite(confidence)) throw new Error('confidence_invalid');
   const difficulty = input.difficulty == null ? 3 : clamp(Math.round(Number(input.difficulty)), 1, 5);
   if (!Number.isFinite(difficulty)) throw new Error('difficulty_invalid');
   const responseMs = input.responseMs == null ? null : clamp(Math.round(Number(input.responseMs)), 0, 3_600_000);
   if (responseMs != null && !Number.isFinite(responseMs)) throw new Error('response_ms_invalid');
-  return { domain, skill, correct: input.correct, confidence, difficulty, responseMs };
+  return { domain, skill, correct, scorePct, confidence, difficulty, responseMs };
 }
 
 function reviewIntervalDays({ correct, streak, mastery, difficulty }) {
@@ -85,7 +90,7 @@ export function recordAttempt(state, rawAttempt, now = new Date()) {
     confidenceCalibration: null
   };
 
-  const target = attempt.correct ? 1 : 0;
+  const target = attempt.scorePct == null ? (attempt.correct ? 1 : 0) : attempt.scorePct / 100;
   const learningRate = skill.attempts < 5 ? 0.34 : 0.20;
   const difficultyWeight = 0.9 + ((attempt.difficulty - 1) * 0.05);
   skill.mastery = clamp(skill.mastery + ((target - skill.mastery) * learningRate * difficultyWeight), 0, 1);
@@ -96,7 +101,8 @@ export function recordAttempt(state, rawAttempt, now = new Date()) {
 
   if (attempt.confidence != null) {
     const confidence01 = attempt.confidence / 100;
-    const calibration = 1 - Math.abs(confidence01 - target);
+    const calibrationTarget = attempt.scorePct == null ? (attempt.correct ? 1 : 0) : attempt.scorePct / 100;
+    const calibration = 1 - Math.abs(confidence01 - calibrationTarget);
     skill.confidenceCalibration = skill.confidenceCalibration == null
       ? calibration
       : (skill.confidenceCalibration * 0.75) + (calibration * 0.25);

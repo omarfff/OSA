@@ -11,6 +11,7 @@ This directory is an intentionally isolated knowledge domain for Dr. Omar Saad A
 - The adaptive learner state persists only performance metadata; patient narratives are not persisted.
 - Built-in OSCE stations are fictional and their transcripts are memory-only for the life of the session.
 - Voice OSCE does not persist raw audio and does not use voice features as stand-alone medical or personality inference.
+- Full Live OSCE stores only graded educational performance in the durable mastery map; interview/viva transcripts remain memory-only.
 
 ## Purpose
 
@@ -28,6 +29,7 @@ The Psychiatry Study Brain is designed to support:
 10. Adaptive mastery tracking, confidence calibration, retrieval practice, and spaced review.
 11. Session-based simulated-patient roleplay and formative psychiatry OSCE practice.
 12. Voice-ready OSCE delivery and learner communication coaching.
+13. Full Live timed OSCE with dynamic actor interaction, bell/timeout, post-station viva, and automatic mastery updates.
 
 ## Learning style
 
@@ -41,7 +43,7 @@ The adaptive server implements:
 
 Tracked domains include MSE, risk, formulation, psychosis, mood, anxiety/OCD/trauma, addiction, child/adolescent, geriatric psychiatry, psychopharmacology, emergency psychiatry, psychotherapy, and law/ethics.
 
-The learner state stores only educational performance fields such as correctness, confidence, mastery, streak, and next review time. It does not store patient narratives.
+The learner state stores only educational performance fields such as correctness, graded score, confidence, mastery, streak, and next review time. It does not store patient narratives.
 
 ## OSCE / roleplay loop
 
@@ -59,15 +61,27 @@ Voice OSCE adds a transport-neutral speech layer without making the core server 
 
 Actor replies include delivery directives such as rate, volume, prosody, response latency, and interruptibility so a speech renderer can make simulated mania, depression, guarded psychosis, withdrawal, or delirium sound behaviorally distinct without changing the hidden clinical facts.
 
-Learner acoustic metrics are used only for communication coaching: pacing, therapeutic pauses, interruptions, and processing time. They are not used to diagnose the learner or infer personality, deception, dangerousness, or competence.
+Learner acoustic metrics are used only for communication coaching: pacing, therapeutic pauses, interruptions, and processing time. They are not used to diagnose the learner or infer personality, deception, dangerousness, intelligence, ethnicity, or competence.
 
 Raw audio is not persisted by Psychiatry Brain. OSCE transcripts remain memory-only and are removed at finish/expiry.
+
+## Full Live OSCE
+
+Full Live OSCE implements:
+
+`start -> 7-10 minute timed interview -> dynamic actor -> bell -> candidate summary -> 3-question viva -> final formative assessment -> mastery update -> session deletion`
+
+The default station length is 8 minutes. Once the deadline is reached, the interview stage closes and the service returns a bell state; further interview turns are rejected.
+
+The actor can become more cooperative, guarded, brief, or mildly irritated based on the learner's interaction style. This changes only delivery/engagement. Hidden clinical facts, risk facts, diagnosis, timeline, tests, medication history, and other station facts remain fixed.
+
+After the interview, the learner submits a concise summary. The engine generates three targeted viva questions, waits for the learner's answers, then performs final formative marking. Domain scores are written automatically into the existing mastery engine as graded 0-100 educational events. No patient narrative or viva transcript is written to learner state.
 
 ## Runtime
 
 `src/context.mjs` loads only this directory's knowledge files.
 
-`src/adaptive-server.mjs` is the default service entry point and keeps the original `/ask` behavior while adding adaptive learning, OSCE, and Voice OSCE endpoints.
+`src/adaptive-server.mjs` is the default service entry point and keeps the original `/ask` behavior while adding adaptive learning, OSCE, Voice OSCE, and Full Live OSCE endpoints.
 
 Run:
 
@@ -79,58 +93,56 @@ npm start
 
 ### API
 
-- `GET /health` - isolated service, adaptive-engine, OSCE, and Voice OSCE status.
+- `GET /health` - isolated service and capability status.
 - `POST /ask` - normal psychiatry-only question answering.
 - `POST /study` - adaptive study modes: `adaptive`, `diagnostic`, `teach`, `viva`, `mcq`, `review`, `case`.
-- `POST /progress/attempt` - record performance metadata for one skill.
+- `POST /progress/attempt` - record binary or graded performance metadata for one skill.
 - `GET /progress` - mastery map, due reviews, and next weak domain.
 - `GET /osce/stations` - list public OSCE station stems without hidden case profiles or rubrics.
 - `POST /osce/start` - start a fictional OSCE session and return actor voice-delivery directives.
 - `POST /osce/turn` - text OSCE turn.
 - `POST /osce/voice/turn` - voice-ready turn using transcript plus optional acoustic-process metrics.
-- `POST /osce/finish` - finish either text or voice-ready OSCE and delete memory-only session state.
-- `POST /osce/voice/finish` - explicit Voice OSCE finish alias with communication coaching.
+- `POST /osce/finish` - finish standard text/voice-ready OSCE and delete memory-only session state.
+- `POST /osce/voice/finish` - explicit Voice OSCE finish alias.
+- `POST /osce/live/start` - start a timed Full Live OSCE; accepts `durationMinutes` from 7-10.
+- `GET /osce/live/status?sessionId=...` - timer/stage/bell status.
+- `POST /osce/live/turn` - timed text or transcript+voice-metrics interview turn with dynamic actor adaptation.
+- `POST /osce/live/close` - manually ring the bell and close the interview stage.
+- `POST /osce/live/viva/start` - submit candidate summary and receive first of three viva questions.
+- `POST /osce/live/viva/answer` - answer the current viva question and receive the next one.
+- `POST /osce/live/finalize` - final marking, automatic mastery-map update, and deletion of in-memory session data.
 
-Example study request:
-
-```json
-{
-  "mode": "diagnostic",
-  "topic": "mse"
-}
-```
-
-Example performance event:
-
-```json
-{
-  "domain": "mse",
-  "skill": "mood_vs_affect",
-  "correct": true,
-  "confidence": 80,
-  "difficulty": 3
-}
-```
-
-Example OSCE start:
+Example Full Live start:
 
 ```json
 {
   "stationId": "acute-mania",
-  "difficulty": "r1"
+  "difficulty": "r1",
+  "durationMinutes": 8
 }
 ```
 
-Example Voice OSCE turn:
+Example Full Live voice-ready turn:
 
 ```json
 {
-  "sessionId": "...",
+  "liveSessionId": "...",
   "transcript": "How many hours have you been sleeping?",
   "wordsPerMinute": 145,
   "responseLatencyMs": 700,
   "pauseRatio": 0.22,
   "interruptionCount": 0
+}
+```
+
+Example graded performance event supported by the mastery engine:
+
+```json
+{
+  "domain": "risk",
+  "skill": "osce_depression_suicide_risk",
+  "scorePct": 78,
+  "difficulty": 3
 }
 ```
 
