@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { askPsychiatryBrain, loadStudyKnowledge } from './server.mjs';
 import { LearnerStore, dueReviews, masterySummary, pickAdaptiveDomain } from './learning.mjs';
+import { OsceSessionStore, buildActorTask, buildExaminerTask, listStations, osceMetadata } from './osce.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, '..');
@@ -77,6 +78,7 @@ export function createAdaptivePsychiatryServer({
   bind = DEFAULT_BIND,
   port = DEFAULT_PORT,
   store = new LearnerStore(DEFAULT_STATE_DIR),
+  osceStore = new OsceSessionStore(),
   ask = askPsychiatryBrain
 } = {}) {
   if (!['127.0.0.1', '::1', 'localhost'].includes(String(bind).toLowerCase())) throw new Error('brain_bind_must_be_loopback');
@@ -100,13 +102,62 @@ export function createAdaptivePsychiatryServer({
           ok: db.files.length > 0 && ollamaOk,
           isolated: true,
           adaptiveLearning: true,
+          osceRoleplay: true,
+          osceStations: listStations().length,
           patientNarrativesPersisted: false,
+          osceTranscriptsPersisted: false,
           knowledgeFiles: db.files.length,
           attempts: state.attempts || 0,
           ollamaOk
         };
         res.statusCode = payload.ok ? 200 : 503;
         res.end(JSON.stringify(payload));
+        return;
+      }
+
+      if (req.method === 'GET' && req.url === '/osce/stations') {
+        res.statusCode = 200;
+        res.end(JSON.stringify({ ok: true, stations: listStations() }));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/osce/start') {
+        const body = await readJson(req);
+        const session = osceStore.start({ stationId: body.stationId || 'random', difficulty: body.difficulty || 'r1' });
+        res.statusCode = 200;
+        res.end(JSON.stringify({ ok: true, ...session }));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/osce/turn') {
+        const body = await readJson(req);
+        const session = osceStore.appendLearner(body.sessionId, body.message);
+        const task = buildActorTask(session);
+        const answer = await ask({ task, context: 'Fictional psychiatry OSCE simulation. Do not use or infer any real patient data.' });
+        osceStore.appendActor(session.id, answer.text);
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+          ok: true,
+          reply: answer.text,
+          session: osceMetadata(osceStore.get(session.id))
+        }));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/osce/finish') {
+        const body = await readJson(req);
+        const session = osceStore.get(body.sessionId);
+        const task = buildExaminerTask(session, body.summary || '');
+        const answer = await ask({ task, context: 'Formative fictional psychiatry OSCE marking. Score only demonstrated performance.' });
+        const finished = osceStore.finish(session.id);
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+          ok: true,
+          station: finished.station.title,
+          formative: true,
+          transcriptPersisted: false,
+          feedback: answer.text
+        }));
         return;
       }
 
@@ -169,7 +220,7 @@ export function createAdaptivePsychiatryServer({
       res.end(JSON.stringify({ ok: false, error: 'not_found' }));
     } catch (err) {
       const message = String(err?.message || err);
-      const badRequest = /(?:required|invalid|not_allowed|too_long|request_too_large)/.test(message);
+      const badRequest = /(?:required|invalid|not_allowed|too_long|request_too_large|not_found|turn_limit)/.test(message);
       res.statusCode = badRequest ? 400 : 500;
       res.end(JSON.stringify({ ok: false, error: message }));
     }
@@ -186,7 +237,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       port: DEFAULT_PORT,
       isolated: true,
       adaptiveLearning: true,
-      patientNarrativesPersisted: false
+      osceRoleplay: true,
+      patientNarrativesPersisted: false,
+      osceTranscriptsPersisted: false
     }) + '\n');
   });
 }
