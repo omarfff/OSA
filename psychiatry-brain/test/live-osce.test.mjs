@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LiveOsceStore, actorAdaptationDirective, aggregateVoiceProcess } from '../src/live-osce.mjs';
+import {
+  LiveOsceStore,
+  actorAdaptationDirective,
+  aggregateVoiceProcess,
+  canonicalDomain,
+  parseMasteryLine
+} from '../src/live-osce.mjs';
 
 function fakeOsce(now = 1_000_000) {
   return {
@@ -76,4 +82,17 @@ test('viva lifecycle requires summary and deletes final session', () => {
   assert.equal(three.complete, true);
   store.finalize(started.liveSessionId, 1_100_500);
   assert.throws(() => store.get(started.liveSessionId, 1_100_600), /not_found/);
+});
+
+test('legacy station domain aliases canonicalize into mastery domains', () => {
+  assert.equal(canonicalDomain('law'), 'law_ethics');
+  assert.equal(canonicalDomain('anxiety_trauma'), 'anxiety_ocd_trauma');
+  assert.equal(canonicalDomain('child'), 'child_adolescent');
+});
+
+test('mastery parser accepts only allowed station domains and clamps scores', () => {
+  const text = 'Feedback here\nMASTERY: {"risk":82,"mse":71,"trading":100,"psychosis":120}';
+  const parsed = parseMasteryLine(text, ['risk', 'mse', 'psychosis']);
+  assert.deepEqual(parsed, { risk: 82, mse: 71, psychosis: 100 });
+  assert.equal('trading' in parsed, false);
 });
