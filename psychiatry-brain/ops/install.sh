@@ -28,6 +28,7 @@ install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/live-osce.mjs" "$LIB_DI
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/document-simulation.mjs" "$LIB_DIR/document-simulation.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/evidence-reasoning.mjs" "$LIB_DIR/evidence-reasoning.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/documentation-lab.mjs" "$LIB_DIR/documentation-lab.mjs"
+install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/documentation-lab-v2.mjs" "$LIB_DIR/documentation-lab-v2.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/consultant-mode.mjs" "$LIB_DIR/consultant-mode.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/adaptive-server.mjs" "$LIB_DIR/adaptive-server.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/training-server.mjs" "$LIB_DIR/training-server.mjs"
