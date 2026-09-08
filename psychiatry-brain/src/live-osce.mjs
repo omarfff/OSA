@@ -3,6 +3,11 @@ import { randomUUID } from 'node:crypto';
 const MIN_DURATION_MS = 7 * 60 * 1000;
 const MAX_DURATION_MS = 10 * 60 * 1000;
 const DEFAULT_DURATION_MS = 8 * 60 * 1000;
+const DOMAIN_ALIASES = Object.freeze({
+  law: 'law_ethics',
+  anxiety_trauma: 'anxiety_ocd_trauma',
+  child: 'child_adolescent'
+});
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -49,6 +54,11 @@ function interactionSignals(transcript = [], metrics = {}) {
   const frequentInterruptions = Number(metrics.interruptions || 0) >= 3;
   const rushed = Number(metrics.wordsPerMinute || 0) > 185;
   return { validation, confrontation, openQuestion, directRisk, frequentInterruptions, rushed };
+}
+
+export function canonicalDomain(value) {
+  const domain = String(value || '').trim().toLowerCase();
+  return DOMAIN_ALIASES[domain] || domain;
 }
 
 export function actorAdaptationDirective(session, metrics = {}) {
@@ -158,6 +168,7 @@ export class LiveOsceStore {
     session.stage = 'viva';
     session.candidateSummary = cleanText(summary, 'summary', 3500);
     session.vivaQuestions = Array.isArray(questions) ? questions.slice(0, 4).map((x) => cleanText(x, 'viva_question', 800)) : [];
+    if (!session.vivaQuestions.length) throw new Error('viva_questions_required');
     return this.publicState(session, now);
   }
 
@@ -226,5 +237,26 @@ export function buildLiveFinalAssessmentTask(session, baseExaminerTask) {
   const vivaText = session.viva.length
     ? session.viva.map((x, i) => `VIVA ${i + 1}: ${x.question}\nANSWER: ${x.answer}`).join('\n')
     : '(no viva answers)';
-  return `${baseExaminerTask}\n\nLIVE OSCE ADDENDUM:\nTiming: ${Math.round(session.durationMs / 60000)} minute station; bell=${session.bell}.\nInteraction state at close: ${JSON.stringify(session.interactionState)}.\nLearner voice-process summary (communication coaching only, never diagnostic): ${JSON.stringify(voice)}.\nViva responses:\n${vivaText}\n\nAdd these sections after the normal OSCE feedback:\n7. Viva performance: concise strengths/gaps.\n8. Communication-process coaching using only the supplied process metrics; do not infer diagnosis, personality, intelligence, ethnicity, or latent traits.\n9. Mastery events: output a final line beginning exactly 'MASTERY:' followed by a compact JSON object mapping each relevant station domain to a 0-100 demonstrated performance score. Scores are formative and should reflect the whole station, including viva.`;
+  const domains = [...new Set((session.station.domains || []).map(canonicalDomain))];
+  return `${baseExaminerTask}\n\nLIVE OSCE ADDENDUM:\nTiming: ${Math.round(session.durationMs / 60000)} minute station; bell=${session.bell}.\nInteraction state at close: ${JSON.stringify(session.interactionState)}.\nLearner voice-process summary (communication coaching only, never diagnostic): ${JSON.stringify(voice)}.\nViva responses:\n${vivaText}\n\nAdd these sections after the normal OSCE feedback:\n7. Viva performance: concise strengths/gaps.\n8. Communication-process coaching using only the supplied process metrics; do not infer diagnosis, personality, intelligence, ethnicity, or latent traits.\n9. Mastery events: output a final line beginning exactly 'MASTERY:' followed by a compact JSON object with ONLY these keys: ${domains.join(', ')}. Map each domain to an integer 0-100 demonstrated performance score. Scores are formative and should reflect the whole station, including viva.`;
+}
+
+export function parseMasteryLine(text, allowedDomains = []) {
+  const match = String(text || '').match(/(?:^|\n)MASTERY:\s*(\{[^\n]+\})\s*$/m);
+  if (!match) return {};
+  try {
+    const parsed = JSON.parse(match[1]);
+    const allowed = new Set(allowedDomains.map(canonicalDomain));
+    const out = {};
+    for (const [rawDomain, rawScore] of Object.entries(parsed || {})) {
+      const domain = canonicalDomain(rawDomain);
+      if (!allowed.has(domain)) continue;
+      const score = Math.round(Number(rawScore));
+      if (!Number.isFinite(score)) continue;
+      out[domain] = clamp(score, 0, 100);
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
