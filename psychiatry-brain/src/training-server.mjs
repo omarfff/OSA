@@ -96,7 +96,7 @@ export function createTrainingPsychiatryServer({ bind = DEFAULT_BIND, port = DEF
         return;
       }
 
-      adaptiveHandler(req, res);
+      await adaptiveHandler(req, res);
     } catch (err) {
       send(res, statusForError(err), { ok: false, error: String(err?.message || err) });
     }
