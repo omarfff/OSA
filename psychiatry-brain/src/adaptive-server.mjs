@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { askPsychiatryBrain, loadStudyKnowledge } from './server.mjs';
 import { LearnerStore, dueReviews, masterySummary, pickAdaptiveDomain } from './learning.mjs';
 import { OsceSessionStore, buildActorTask, buildExaminerTask, listStations, osceMetadata } from './osce.mjs';
+import { VoiceOsceStore, actorDelivery, sanitizeVoiceObservation, describeLearnerVoice, voiceExaminerContext, voiceOsceCapabilities } from './voice-osce.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, '..');
@@ -74,11 +75,17 @@ export function buildStudyTask({ mode = 'adaptive', topic = '', state, now = new
   return `${common}\nChoose the most educational next action. If the learner has little recorded practice, run a diagnostic question; otherwise prioritize due/weak skills. Ask exactly ONE question and wait for the learner response. Do not reveal the answer yet. End with a confidence request.`;
 }
 
+function deliveryTaskSuffix(session) {
+  const delivery = actorDelivery(session.station.id);
+  return `\n\nVOICE-ACTOR DELIVERY TARGET (content still governed by the hidden station profile): rate=${delivery.rate}; volume=${delivery.volume}; prosody=${delivery.prosody}; response latency target=${delivery.latencyMs}ms; interruptions=${delivery.interruptions}. Performance note: ${delivery.notes}. Do not mention these directions in the spoken reply.`;
+}
+
 export function createAdaptivePsychiatryServer({
   bind = DEFAULT_BIND,
   port = DEFAULT_PORT,
   store = new LearnerStore(DEFAULT_STATE_DIR),
   osceStore = new OsceSessionStore(),
+  voiceStore = new VoiceOsceStore(),
   ask = askPsychiatryBrain
 } = {}) {
   if (!['127.0.0.1', '::1', 'localhost'].includes(String(bind).toLowerCase())) throw new Error('brain_bind_must_be_loopback');
@@ -103,9 +110,12 @@ export function createAdaptivePsychiatryServer({
           isolated: true,
           adaptiveLearning: true,
           osceRoleplay: true,
+          voiceOsce: true,
+          voiceOsceCapabilities,
           osceStations: listStations().length,
           patientNarrativesPersisted: false,
           osceTranscriptsPersisted: false,
+          rawAudioPersisted: false,
           knowledgeFiles: db.files.length,
           attempts: state.attempts || 0,
           ollamaOk
@@ -124,38 +134,73 @@ export function createAdaptivePsychiatryServer({
       if (req.method === 'POST' && req.url === '/osce/start') {
         const body = await readJson(req);
         const session = osceStore.start({ stationId: body.stationId || 'random', difficulty: body.difficulty || 'r1' });
+        voiceStore.start(session.sessionId, session.station.id);
         res.statusCode = 200;
-        res.end(JSON.stringify({ ok: true, ...session }));
+        res.end(JSON.stringify({
+          ok: true,
+          ...session,
+          voice: {
+            enabled: true,
+            actorDelivery: actorDelivery(session.station.id),
+            capabilities: voiceOsceCapabilities
+          }
+        }));
         return;
       }
 
       if (req.method === 'POST' && req.url === '/osce/turn') {
         const body = await readJson(req);
         const session = osceStore.appendLearner(body.sessionId, body.message);
-        const task = buildActorTask(session);
+        const task = buildActorTask(session) + deliveryTaskSuffix(session);
         const answer = await ask({ task, context: 'Fictional psychiatry OSCE simulation. Do not use or infer any real patient data.' });
         osceStore.appendActor(session.id, answer.text);
         res.statusCode = 200;
         res.end(JSON.stringify({
           ok: true,
           reply: answer.text,
+          actorDelivery: actorDelivery(session.station.id),
           session: osceMetadata(osceStore.get(session.id))
         }));
         return;
       }
 
-      if (req.method === 'POST' && req.url === '/osce/finish') {
+      if (req.method === 'POST' && req.url === '/osce/voice/turn') {
+        const body = await readJson(req);
+        const packet = sanitizeVoiceObservation(body);
+        const session = osceStore.appendLearner(body.sessionId, packet.transcript);
+        voiceStore.append(session.id, packet);
+        const task = buildActorTask(session) + deliveryTaskSuffix(session);
+        const answer = await ask({ task, context: 'Fictional psychiatry Voice OSCE. Acoustic measures are communication observations only and must never be used to diagnose the learner.' });
+        osceStore.appendActor(session.id, answer.text);
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+          ok: true,
+          reply: answer.text,
+          actorDelivery: actorDelivery(session.station.id),
+          learnerVoiceObservation: describeLearnerVoice(packet.observed),
+          rawAudioPersisted: false,
+          transcriptPersisted: false,
+          session: osceMetadata(osceStore.get(session.id))
+        }));
+        return;
+      }
+
+      if (req.method === 'POST' && (req.url === '/osce/finish' || req.url === '/osce/voice/finish')) {
         const body = await readJson(req);
         const session = osceStore.get(body.sessionId);
-        const task = buildExaminerTask(session, body.summary || '');
-        const answer = await ask({ task, context: 'Formative fictional psychiatry OSCE marking. Score only demonstrated performance.' });
+        const voiceSummary = voiceStore.summary(session.id);
+        const task = `${buildExaminerTask(session, body.summary || '')}\n\n${voiceExaminerContext(voiceSummary)}`;
+        const answer = await ask({ task, context: 'Formative fictional psychiatry OSCE marking. Score only demonstrated performance. Voice features are communication observations, not diagnostic evidence.' });
         const finished = osceStore.finish(session.id);
+        const finalVoice = voiceStore.finish(session.id);
         res.statusCode = 200;
         res.end(JSON.stringify({
           ok: true,
           station: finished.station.title,
           formative: true,
           transcriptPersisted: false,
+          rawAudioPersisted: false,
+          voiceCommunication: finalVoice,
           feedback: answer.text
         }));
         return;
@@ -238,8 +283,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       isolated: true,
       adaptiveLearning: true,
       osceRoleplay: true,
+      voiceOsce: true,
       patientNarrativesPersisted: false,
-      osceTranscriptsPersisted: false
+      osceTranscriptsPersisted: false,
+      rawAudioPersisted: false
     }) + '\n');
   });
 }
