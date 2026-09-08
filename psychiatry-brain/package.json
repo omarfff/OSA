@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "context": "node src/context.mjs",
+    "start": "node src/adaptive-server.mjs",
     "test": "node --test test/*.test.mjs"
   }
 }
