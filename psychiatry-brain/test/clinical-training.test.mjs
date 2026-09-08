@@ -9,10 +9,11 @@ import {
 } from '../src/evidence-reasoning.mjs';
 import {
   sanitizeDocumentationRequest,
+  splitDocumentationSource,
   buildStructuredNoteTask,
   buildDocumentationAuditTask,
   generateDocumentationLabBundle
-} from '../src/documentation-lab.mjs';
+} from '../src/documentation-lab-v2.mjs';
 import {
   buildConsultantChallengeTask,
   buildConsultantFeedbackTask,
@@ -25,7 +26,9 @@ function stubAskCollector() {
   const ask = async ({ task, context }) => {
     calls.push({ task, context });
     if (task.includes('CLINICAL QUESTION')) return { text: '1. Clinical question\n2. Decision variables\n3. Missing information' };
+    if (task.includes('SOURCE EXTRACTION FOR EVIDENCE')) return { text: '[S1] renal function modifies prescribing.' };
     if (task.includes('AUDITABLE DECISION SUPPORT')) return { text: 'A. Clinical question\nB. Patient modifiers\nC. Evidence map [S1]\nD. Recommendation' };
+    if (task.includes('SOURCE FACT EXTRACTION')) return { text: '[Unit 1] Patient reports insomnia.' };
     if (task.includes('SOURCE-FAITHFUL NOTE')) return { text: 'Presenting complaint: documented.\nRisk: not documented.' };
     if (task.includes('EVIDENCE AUDIT')) return { text: '1. Supported documentation\n2. Unsupported claims: none.' };
     if (task.includes('ORAL DEFENCE')) return { text: 'Which current guideline supports this choice?\nWhat evidence supports your decision?' };
@@ -57,7 +60,7 @@ test('EBP prompts require auditable rationale rather than hidden chain-of-though
   assert.match(s, /If sources conflict/i);
 });
 
-test('evidence reasoning bundle is source-grounded and non-persistent', async () => {
+test('evidence reasoning compresses source first and returns non-persistent grounded bundle', async () => {
   const { ask, calls } = stubAskCollector();
   const bundle = await generateEvidenceReasoningBundle({
     caseText: 'De-identified patient with severe depression and CKD.',
@@ -67,9 +70,13 @@ test('evidence reasoning bundle is source-grounded and non-persistent', async ()
   assert.equal(bundle.externalEvidenceRequired, false);
   assert.equal(bundle.casePersisted, false);
   assert.equal(bundle.evidenceTextPersisted, false);
+  assert.equal(bundle.evidenceDigestPersisted, false);
   assert.equal(bundle.hiddenChainOfThoughtExposed, false);
-  assert.equal(calls.length, 2);
-  assert.match(calls[1].context, /\[S1\]/);
+  assert.equal(calls.length, 3);
+  assert.match(calls[1].task, /SOURCE EXTRACTION FOR EVIDENCE/);
+  assert.match(calls[1].context, /AUTHORITATIVE SOURCE EXCERPT S1/);
+  assert.match(calls[2].context, /SOURCE-GROUNDED EVIDENCE DIGEST/);
+  assert.match(calls[2].context, /\[S1\]/);
 });
 
 test('evidence reasoning without external sources explicitly asks for current retrieval', async () => {
@@ -91,10 +98,18 @@ test('documentation lab refuses to treat absent data as negative and supports le
   assert.match(noteTask, /Absence of documentation is not/i);
   assert.match(noteTask, /MSE must contain only observable/i);
   assert.match(auditTask, /Learner-vs-model comparison/i);
-  assert.match(auditTask, /what remains unknown/i);
+  assert.match(auditTask, /state what remains unknown/i);
 });
 
-test('documentation bundle never persists transcript, draft, note or raw audio', async () => {
+test('documentation chunking covers long source instead of truncating first pages', () => {
+  const source = Array.from({ length: 80 }, (_, i) => `Section ${i + 1}. ${'clinical source text '.repeat(20)}`).join('\n\n');
+  const chunks = splitDocumentationSource(source, { chunkChars: 1200 });
+  assert.ok(chunks.length > 3);
+  assert.match(chunks[0].text, /Section 1/);
+  assert.match(chunks.at(-1).text, /Section 80/);
+});
+
+test('documentation bundle extracts facts first and never persists transcript, draft, note or raw audio', async () => {
   const { ask, calls } = stubAskCollector();
   const bundle = await generateDocumentationLabBundle({
     sourceText: 'Fictional transcript: patient reports insomnia.',
@@ -102,12 +117,17 @@ test('documentation bundle never persists transcript, draft, note or raw audio',
     sourceKind: 'fictional_transcript'
   }, { ask });
   assert.equal(bundle.sourcePersisted, false);
+  assert.equal(bundle.sourceFactDigestPersisted, false);
   assert.equal(bundle.learnerDraftPersisted, false);
   assert.equal(bundle.generatedNotePersisted, false);
   assert.equal(bundle.rawAudioPersisted, false);
-  assert.equal(calls.length, 2);
-  assert.match(calls[1].context, /SOURCE MATERIAL/);
-  assert.match(calls[1].context, /LEARNER DRAFT/);
+  assert.equal(bundle.sourceUnits, 1);
+  assert.deepEqual(bundle.sourceCoverageUnits, [1]);
+  assert.equal(calls.length, 3);
+  assert.match(calls[0].task, /SOURCE FACT EXTRACTION/);
+  assert.match(calls[0].context, /SOURCE UNIT 1\/1/);
+  assert.match(calls[1].context, /SOURCE-DERIVED FACT UNITS/);
+  assert.match(calls[2].context, /LEARNER DRAFT/);
 });
 
 test('consultant mode asks one evidence challenge then gives source-linked formative feedback', async () => {
