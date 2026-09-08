@@ -19,8 +19,10 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
 fi
 
 install -d -o root -g "$SERVICE_USER" -m 0750 "$LIB_DIR" "$SHARE_DIR" "$KNOWLEDGE_DIR"
-install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$STATE_DIR"
+install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 "$STATE_DIR"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/server.mjs" "$LIB_DIR/server.mjs"
+install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/learning.mjs" "$LIB_DIR/learning.mjs"
+install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/adaptive-server.mjs" "$LIB_DIR/adaptive-server.mjs"
 
 find "$KNOWLEDGE_DIR" -maxdepth 1 -type f -name '*.md' -delete
 for file in "$SRC_DIR"/knowledge/*.md; do
@@ -29,7 +31,7 @@ done
 
 cat > "$UNIT" <<'UNITEOF'
 [Unit]
-Description=OSA Isolated Psychiatry Study Brain
+Description=OSA Isolated Adaptive Psychiatry Study Brain
 After=network.target ollama.service osa-ollama-loopback.service
 Wants=ollama.service
 
@@ -43,7 +45,8 @@ Environment=PSYCHIATRY_BRAIN_PORT=8791
 Environment=PSYCHIATRY_BRAIN_MODEL=qwen3.5:0.8b
 Environment=PSYCHIATRY_OLLAMA_URL=http://127.0.0.1:11434
 Environment=PSYCHIATRY_BRAIN_KNOWLEDGE_DIR=/usr/local/share/osa-psychiatry/knowledge
-ExecStart=/usr/bin/node /usr/local/lib/osa-psychiatry/server.mjs
+Environment=PSYCHIATRY_BRAIN_STATE_DIR=/var/lib/osa-psychiatry-brain
+ExecStart=/usr/bin/node /usr/local/lib/osa-psychiatry/adaptive-server.mjs
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
