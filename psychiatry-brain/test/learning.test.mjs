@@ -29,6 +29,23 @@ test('records mastery without storing patient narrative fields', () => {
   assert.doesNotMatch(JSON.stringify(next), /SHOULD_NOT_PERSIST/);
 });
 
+test('graded OSCE score updates mastery proportionally without narrative persistence', () => {
+  const now = new Date('2026-09-08T12:00:00Z');
+  const state = emptyLearnerState(now);
+  const next = recordAttempt(state, {
+    domain: 'risk',
+    skill: 'osce_depression_suicide_risk',
+    scorePct: 75,
+    difficulty: 3,
+    transcript: 'SHOULD_NOT_PERSIST'
+  }, now);
+  const skill = next.domains.risk.skills.osce_depression_suicide_risk;
+  assert.equal(skill.attempts, 1);
+  assert.equal(skill.correct, 1);
+  assert.ok(skill.mastery > 0 && skill.mastery < 1);
+  assert.doesNotMatch(JSON.stringify(next), /SHOULD_NOT_PERSIST/);
+});
+
 test('incorrect answer becomes due sooner than repeated correct retrieval', () => {
   const now = new Date('2026-09-08T12:00:00Z');
   let wrong = emptyLearnerState(now);
@@ -65,6 +82,13 @@ test('due reviews prioritizes low mastery skills', () => {
 
 test('attempt validation only accepts allowed psychiatry domains', () => {
   assert.throws(() => sanitizeAttempt({ domain: 'trading', skill: 'wallet', correct: true }), /domain_not_allowed/);
+});
+
+test('attempt requires either binary correctness or graded score', () => {
+  assert.throws(() => sanitizeAttempt({ domain: 'mse', skill: 'x' }), /correct_or_score_required/);
+  const graded = sanitizeAttempt({ domain: 'mse', skill: 'x', scorePct: 59 });
+  assert.equal(graded.correct, false);
+  assert.equal(graded.scorePct, 59);
 });
 
 test('study task asks one question and uses weak domain', () => {
