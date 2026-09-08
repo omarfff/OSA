@@ -10,6 +10,7 @@ This directory is an intentionally isolated knowledge domain for Dr. Omar Saad A
 - Patient material must be de-identified before use.
 - The adaptive learner state persists only performance metadata; patient narratives are not persisted.
 - Built-in OSCE stations are fictional and their transcripts are memory-only for the life of the session.
+- Voice OSCE does not persist raw audio and does not use voice features as stand-alone medical or personality inference.
 
 ## Purpose
 
@@ -26,6 +27,7 @@ The Psychiatry Study Brain is designed to support:
 9. Psychiatry AI/R&D ideas, evaluation frameworks, inventions, devices, patents, and investment concepts.
 10. Adaptive mastery tracking, confidence calibration, retrieval practice, and spaced review.
 11. Session-based simulated-patient roleplay and formative psychiatry OSCE practice.
+12. Voice-ready OSCE delivery and learner communication coaching.
 
 ## Learning style
 
@@ -51,11 +53,21 @@ Initial stations include depression with suicide-risk assessment, acute mania, f
 
 Difficulty levels are `foundation`, `r1`, and `board`. The actor keeps the hidden case profile private during the station and answers in natural Egyptian Arabic by default, switching to English when the learner does. OSCE scoring is formative rather than an official examination result.
 
+## Voice OSCE
+
+Voice OSCE adds a transport-neutral speech layer without making the core server depend on a commercial speech provider. A voice-capable client can transcribe the learner locally or through an authorized speech service and submit the transcript plus optional acoustic-process metrics.
+
+Actor replies include delivery directives such as rate, volume, prosody, response latency, and interruptibility so a speech renderer can make simulated mania, depression, guarded psychosis, withdrawal, or delirium sound behaviorally distinct without changing the hidden clinical facts.
+
+Learner acoustic metrics are used only for communication coaching: pacing, therapeutic pauses, interruptions, and processing time. They are not used to diagnose the learner or infer personality, deception, dangerousness, or competence.
+
+Raw audio is not persisted by Psychiatry Brain. OSCE transcripts remain memory-only and are removed at finish/expiry.
+
 ## Runtime
 
 `src/context.mjs` loads only this directory's knowledge files.
 
-`src/adaptive-server.mjs` is the default service entry point and keeps the original `/ask` behavior while adding adaptive learning and OSCE endpoints.
+`src/adaptive-server.mjs` is the default service entry point and keeps the original `/ask` behavior while adding adaptive learning, OSCE, and Voice OSCE endpoints.
 
 Run:
 
@@ -67,15 +79,17 @@ npm start
 
 ### API
 
-- `GET /health` - isolated service, adaptive-engine and OSCE status.
+- `GET /health` - isolated service, adaptive-engine, OSCE, and Voice OSCE status.
 - `POST /ask` - normal psychiatry-only question answering.
 - `POST /study` - adaptive study modes: `adaptive`, `diagnostic`, `teach`, `viva`, `mcq`, `review`, `case`.
 - `POST /progress/attempt` - record performance metadata for one skill.
 - `GET /progress` - mastery map, due reviews, and next weak domain.
 - `GET /osce/stations` - list public OSCE station stems without hidden case profiles or rubrics.
-- `POST /osce/start` - start a fictional OSCE session.
-- `POST /osce/turn` - send the learner's next interview question/statement and receive the actor reply.
-- `POST /osce/finish` - end the station, delete the in-memory session, and receive formative examiner feedback.
+- `POST /osce/start` - start a fictional OSCE session and return actor voice-delivery directives.
+- `POST /osce/turn` - text OSCE turn.
+- `POST /osce/voice/turn` - voice-ready turn using transcript plus optional acoustic-process metrics.
+- `POST /osce/finish` - finish either text or voice-ready OSCE and delete memory-only session state.
+- `POST /osce/voice/finish` - explicit Voice OSCE finish alias with communication coaching.
 
 Example study request:
 
@@ -104,6 +118,19 @@ Example OSCE start:
 {
   "stationId": "acute-mania",
   "difficulty": "r1"
+}
+```
+
+Example Voice OSCE turn:
+
+```json
+{
+  "sessionId": "...",
+  "transcript": "How many hours have you been sleeping?",
+  "wordsPerMinute": 145,
+  "responseLatencyMs": 700,
+  "pauseRatio": 0.22,
+  "interruptionCount": 0
 }
 ```
 
