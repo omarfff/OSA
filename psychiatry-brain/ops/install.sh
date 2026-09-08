@@ -26,7 +26,11 @@ install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/osce.mjs" "$LIB_DIR/osc
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/voice-osce.mjs" "$LIB_DIR/voice-osce.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/live-osce.mjs" "$LIB_DIR/live-osce.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/document-simulation.mjs" "$LIB_DIR/document-simulation.mjs"
+install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/evidence-reasoning.mjs" "$LIB_DIR/evidence-reasoning.mjs"
+install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/documentation-lab.mjs" "$LIB_DIR/documentation-lab.mjs"
+install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/consultant-mode.mjs" "$LIB_DIR/consultant-mode.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/adaptive-server.mjs" "$LIB_DIR/adaptive-server.mjs"
+install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/training-server.mjs" "$LIB_DIR/training-server.mjs"
 
 find "$KNOWLEDGE_DIR" -maxdepth 1 -type f -name '*.md' -delete
 for file in "$SRC_DIR"/knowledge/*.md; do
@@ -35,7 +39,7 @@ done
 
 cat > "$UNIT" <<'UNITEOF'
 [Unit]
-Description=OSA Isolated Adaptive Psychiatry Study Brain
+Description=OSA Isolated Adaptive Psychiatry Training Brain
 After=network.target ollama.service osa-ollama-loopback.service
 Wants=ollama.service
 
@@ -50,7 +54,7 @@ Environment=PSYCHIATRY_BRAIN_MODEL=qwen3.5:0.8b
 Environment=PSYCHIATRY_OLLAMA_URL=http://127.0.0.1:11434
 Environment=PSYCHIATRY_BRAIN_KNOWLEDGE_DIR=/usr/local/share/osa-psychiatry/knowledge
 Environment=PSYCHIATRY_BRAIN_STATE_DIR=/var/lib/osa-psychiatry-brain
-ExecStart=/usr/bin/node /usr/local/lib/osa-psychiatry/adaptive-server.mjs
+ExecStart=/usr/bin/node /usr/local/lib/osa-psychiatry/training-server.mjs
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
@@ -85,4 +89,6 @@ systemctl restart osa-psychiatry-brain.service
 sleep 2
 systemctl is-active --quiet osa-psychiatry-brain.service
 curl -fsS --max-time 10 http://127.0.0.1:8791/health
+printf '\n'
+curl -fsS --max-time 10 http://127.0.0.1:8791/training/capabilities
 printf '\n'
