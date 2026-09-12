@@ -13,6 +13,7 @@ Find *mispriced but inspectable* cars, not merely cheap ads. Every candidate is 
 - engine/mileage risk,
 - suspicious payment language,
 - repaint/chassis/overheat/rebuild language,
+- seller activity risk,
 - relisting identity and price-drop history,
 - confidence in the available data.
 
@@ -29,6 +30,11 @@ The core economic rule is:
 - `PASS`: all-in economics do not work.
 - `HIGH_RISK`: mechanical/body risk dominates the apparent discount.
 - `REJECT_PRICE_UNRELIABLE`: price appears to be a down payment/installment/waiver figure.
+- `REJECT_NON_VEHICLE`: parts, rental, wanted ads and other search noise.
+
+## Arabic condition semantics
+
+The quality gate is context-aware. For example, `شاص شرط` is not treated as chassis damage, while `ضربة شاص` is. A generic `يوجد تمويل` mention is a soft confidence penalty, while explicit down-payment/remaining-installment language is rejected as an unreliable cash price.
 
 ## Public collection policy
 
@@ -52,15 +58,36 @@ npm run car:hunt -- score listing.json comps.json
 
 # Rank multiple listings
 npm run car:hunt -- rank listings.json comps-by-key.json
+
+# Run one persistent autonomous cycle
+npm run car:autopilot
+```
+
+## Autopilot
+
+`src/car-hunter/autopilot.js` maintains a bounded local state file, tracks price changes, keeps recent comparable listings, scores the current batch and writes a compact `latest.json` containing alerts and the top candidates.
+
+Default VPS state paths:
+
+- `/var/lib/osa-car-hunter/state.json`
+- `/var/lib/osa-car-hunter/latest.json`
+
+The installer in `ops/car-hunter/install.sh` creates a locked-down system user and a systemd timer. The timer runs every 30 minutes with randomized delay and a deliberately small collection budget.
+
+```bash
+sudo bash ops/car-hunter/install.sh
+sudo systemctl status osa-car-hunter.timer
+sudo systemctl start osa-car-hunter.service
+sudo cat /var/lib/osa-car-hunter/latest.json
 ```
 
 ## Haraj units
 
-Haraj often exposes compact numbers such as price `55` for 55,000 SAR and mileage `205` for 205,000 km in listing metadata. The Haraj normalizer applies the thousand conversion only for Haraj source records and only when values are below 1,000.
+Haraj may expose compact numbers such as price `55` for 55,000 SAR and mileage `205` for 205,000 km in listing metadata. The Haraj normalizer applies the thousand conversion only for Haraj source records and only when values are below 1,000. Non-vehicle search noise is rejected before deal ranking.
 
 ## Storage
 
-`ops/car-hunter/schema.sql` defines locked-down Supabase tables for listings, price snapshots, assessments and collection runs. RLS is enabled and `anon`/`authenticated` privileges are revoked; the intended writer is a server-side/service-role process.
+The current autopilot works without a database by using bounded local state. `ops/car-hunter/schema.sql` also defines locked-down Supabase tables for listings, price snapshots, assessments and collection runs if central persistence is later enabled. RLS is enabled and `anon`/`authenticated` privileges are revoked; the intended writer is a server-side/service-role process.
 
 ## Inspection gate
 
