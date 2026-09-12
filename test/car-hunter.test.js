@@ -85,6 +85,13 @@ test('parts/rental noise is rejected as non-vehicle', () => {
   assert.equal(result.status, 'REJECT_NON_VEHICLE');
 });
 
+test('commercial vehicles are rejected from passenger-car deal ranking', () => {
+  const listing = normalizeListing({ source: 'haraj', make: 'Mercedes-Benz', title: 'شاحنة مرسيدس 2006', price: 144000 });
+  const result = assessDeal(listing, []);
+  assert.equal(listing.listingKind, 'commercial_vehicle');
+  assert.equal(result.status, 'REJECT_NON_VEHICLE');
+});
+
 test('explicit full-repaint / chassis damage / overheat language increases reserve and risk', () => {
   const risky = normalizeListing({
     source: 'manual',

@@ -168,6 +168,16 @@ function offerDetails(offers) {
   };
 }
 
+function validatedModelHint(model, text = '') {
+  const normalized = String(model || '').toUpperCase().replace(/\s+/g, '');
+  if (!normalized) return null;
+  const base = normalized.replace(/I$/, '');
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const suffix = normalized.endsWith('I') ? 'I?' : '';
+  const re = new RegExp(`(?:^|[^A-Z0-9])${escaped}${suffix}(?=$|[^A-Z0-9])`, 'i');
+  return re.test(String(text)) ? model : null;
+}
+
 export function listingFromJsonLdItem(item, hints = {}) {
   if (!item || typeof item !== 'object') return null;
   const title = stripTags(item.name || item.headline || '');
@@ -181,6 +191,8 @@ export function listingFromJsonLdItem(item, hints = {}) {
   const mileage = parseMileage(description);
   const year = parseModelYear(title, description);
   const schemaTypes = getSchemaTypes(item);
+  const modelHint = validatedModelHint(hints.model, `${title}\n${description}`);
+  const normalizedHints = { ...hints, model: modelHint };
 
   return normalizeListing({
     source: 'haraj',
@@ -190,7 +202,7 @@ export function listingFromJsonLdItem(item, hints = {}) {
     title,
     description,
     make: hints.make,
-    model: hints.model,
+    model: modelHint,
     year,
     mileage,
     price,
@@ -198,7 +210,7 @@ export function listingFromJsonLdItem(item, hints = {}) {
     city: offer.city || null,
     images: normalizeImages(item.image),
     schemaType: schemaTypes.join(','),
-  }, hints);
+  }, normalizedHints);
 }
 
 export function parseHarajSearchHtml(html, hints = {}) {

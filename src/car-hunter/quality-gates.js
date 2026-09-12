@@ -19,6 +19,7 @@ const NON_VEHICLE_TITLE_PATTERNS = [
   { kind: 'wanted', re: /^(?:مطلوب|ابحث\s+عن|أبحث\s+عن)/i },
   { kind: 'service', re: /برمجة|ورشة|صيانة\s+سيارات|فحص\s+كمبيوتر|خدمة\s+صيانة/i },
   { kind: 'motorcycle', re: /دباب|دراجة\s+نارية/i },
+  { kind: 'commercial_vehicle', re: /^(?:شاحنة|شاحنه|قلاب|سطحة|سطحه|تريلا)(?=\s|$|[-_:])/i },
 ];
 
 const AIRBAG_WORD = '(?:ايرباق|إيرباق|ايرباج|إيرباج|ارباق|أرباق|الارباقات|الابرباج|airbag)';

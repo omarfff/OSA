@@ -86,6 +86,30 @@ test('Product JSON-LD exposes seller/city/price but parts title is rejected as n
   assert.equal(listing.listingKind, 'parts');
 });
 
+test('specific search hint cannot relabel a different BMW model', () => {
+  const html = `<script type="application/ld+json">${JSON.stringify({
+    '@type': 'SearchResultsPage', mainEntity: { '@type': 'ItemList', itemListElement: [{ '@type': 'ListItem', item: {
+      '@type': 'Thing', name: '2026 BMW X6 xDrive 40i M',
+      description: 'BMW X6 موديل 2026 السعر 399999 ريال',
+      url: 'https://haraj.com.sa/11188342574/BMW_X6_2026/',
+    }}] },
+  })}</script>`;
+  const [listing] = parseHarajSearchHtml(html, { make: 'BMW', model: '540I' });
+  assert.equal(listing.model, 'X6');
+});
+
+test('specific search hint is retained when the ad text actually matches it', () => {
+  const html = `<script type="application/ld+json">${JSON.stringify({
+    '@type': 'SearchResultsPage', mainEntity: { '@type': 'ItemList', itemListElement: [{ '@type': 'ListItem', item: {
+      '@type': 'Thing', name: 'BMW 530 2022',
+      description: 'BMW 530 موديل 2022 المطلوب 167 الف',
+      url: 'https://haraj.com.sa/11188387793/BMW_530_2022/',
+    }}] },
+  })}</script>`;
+  const [listing] = parseHarajSearchHtml(html, { make: 'BMW', model: '530I' });
+  assert.equal(listing.model, '530I');
+});
+
 test('structured search extraction deduplicates links', () => {
   const item = {
     '@type': 'Thing', name: 'BMW X5 2015', description: 'الموديل 2015 الممشى 180 الف المطلوب 53 الف',
