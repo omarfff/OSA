@@ -1,33 +1,6 @@
 import crypto from 'node:crypto';
+import { analyzeListingQuality } from './quality-gates.js';
 import { engineProfile, modelLiquidity } from './risk-library.js';
-
-const PAYMENT_RISK_PATTERNS = [
-  /دفعة(?:\s+أولى)?/i,
-  /تنازل/i,
-  /قسط|أقساط|اقساط/i,
-  /باقي(?:\s+الأقساط|\s+الاقساط)?/i,
-  /تمويل/i,
-  /down\s*payment/i,
-];
-
-const HIGH_RISK_PATTERNS = [
-  { key: 'chassis', re: /شاص|شاصي|شاسيه|قص\s+ولحام|قص\s+لحام/i, penalty: 35, reserve: 12000 },
-  { key: 'overheat', re: /حرارة|سخون|overheat/i, penalty: 30, reserve: 10000 },
-  { key: 'engine_rebuilt', re: /توضيب|مكينة\s+مجددة|مكينه\s+مجدده|engine\s+rebuilt/i, penalty: 28, reserve: 9000 },
-  { key: 'engine_changed', re: /مكينة\s+مغيرة|مكينه\s+مغيره|engine\s+replaced/i, penalty: 20, reserve: 7000 },
-  { key: 'gearbox_changed', re: /قير\s+مغير|جير\s+مغير|gearbox\s+replaced/i, penalty: 18, reserve: 6000 },
-  { key: 'airbag', re: /ايرباق|إيرباق|airbag/i, penalty: 25, reserve: 7000 },
-  { key: 'full_repaint', re: /رش\s+كامل|مرشوش(?:ة)?\s+كامل/i, penalty: 12, reserve: 2500 },
-  { key: 'side_repaint', re: /رش\s+(?:على\s+)?الجانب|رش\s+جنب|مرشوش\s+جنب/i, penalty: 5, reserve: 1000 },
-  { key: 'american_import', re: /وارد\s+امريكي|وارد\s+أمريكي|امريكي|أمريكي/i, penalty: 8, reserve: 1500 },
-];
-
-const UNVERIFIED_TRIM_PATTERNS = [
-  /كت\s*AMG/i,
-  /AMG\s*kit/i,
-  /M\s*Sport\s*kit/i,
-  /كت\s*M/i,
-];
 
 function numeric(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -77,22 +50,6 @@ function normalizeMileage(value, source) {
   return Math.round(n);
 }
 
-function riskFlagsFromText(text = '') {
-  const flags = [];
-  for (const item of HIGH_RISK_PATTERNS) {
-    if (item.re.test(text)) flags.push(item);
-  }
-  return flags;
-}
-
-function paymentRisk(text = '') {
-  return PAYMENT_RISK_PATTERNS.some((re) => re.test(text));
-}
-
-function hasUnverifiedTrimClaim(text = '') {
-  return UNVERIFIED_TRIM_PATTERNS.some((re) => re.test(text));
-}
-
 export function fromHarajSharedPost(item) {
   if (!item) throw new Error('haraj item is required');
   return {
@@ -119,12 +76,10 @@ export function normalizeListing(input, options = {}) {
   const text = `${input.title || ''}\n${input.description || ''}`;
   const make = normalizeMake(input.make || options.make || inferMake(text));
   const model = normalizeModel(input.model || options.model || inferModel(text));
-  const priceSar = normalizePrice(input.price, source);
-  const mileageKm = normalizeMileage(input.mileage, source);
+  const priceSar = normalizePrice(input.price ?? input.priceSar, source);
+  const mileageKm = normalizeMileage(input.mileage ?? input.mileageKm, source);
   const year = numeric(input.year);
-  const flags = riskFlagsFromText(text);
-  const nonCashPriceRisk = paymentRisk(text) || input.priceType === 'down-payment';
-  const trimClaimUnverified = hasUnverifiedTrimClaim(text) && !input.vinVerifiedTrim;
+  const quality = analyzeListingQuality(input);
 
   return {
     ...input,
@@ -137,9 +92,12 @@ export function normalizeListing(input, options = {}) {
     engineCode: input.engineCode ? String(input.engineCode).toUpperCase() : null,
     description: input.description || '',
     title: input.title || '',
-    riskFlags: flags.map(({ key, penalty, reserve }) => ({ key, penalty, reserve })),
-    nonCashPriceRisk,
-    trimClaimUnverified,
+    listingKind: quality.kind,
+    riskFlags: quality.riskFlags,
+    priceStructureRisk: quality.priceStructure,
+    nonCashPriceRisk: quality.priceStructure.level === 'hard',
+    trimClaimUnverified: quality.trimClaimUnverified,
+    sellerRisk: quality.sellerRisk,
     images: Array.isArray(input.images) ? input.images : [],
   };
 }
@@ -152,8 +110,8 @@ function inferMake(text) {
 
 function inferModel(text) {
   const patterns = [
-    /\b(C\s?200|C\s?300|E\s?200|E\s?300|GLC\s?\d*|GLE\s?\d*)\b/i,
-    /\b(320I|330I|420I|430I|520I|530I|540I|X3|X5)\b/i,
+    /\b(C\s?180|C\s?200|C\s?250|C\s?300|E\s?200|E\s?250|E\s?300|GLC\s?\d*|GLE\s?\d*)\b/i,
+    /\b(318I|320I|330I|335I|420I|430I|435I|520I|528I|530I|535I|540I|X3|X4|X5|X6)\b/i,
   ];
   for (const re of patterns) {
     const m = text.match(re);
@@ -175,7 +133,7 @@ function mad(values, med = median(values)) {
 }
 
 function compatibleComp(target, comp, options = {}) {
-  if (!comp || comp.nonCashPriceRisk || !Number.isFinite(comp.priceSar)) return false;
+  if (!comp || comp.listingKind !== 'vehicle' || comp.nonCashPriceRisk || !Number.isFinite(comp.priceSar)) return false;
   if (target.make && comp.make && target.make !== comp.make) return false;
   if (target.model && comp.model && target.model !== comp.model) return false;
   const yearWindow = options.yearWindow ?? 1;
@@ -291,7 +249,13 @@ export function listingFingerprint(listingInput) {
 
 export function analyzePriceHistory(snapshots = []) {
   const clean = snapshots
-    .map((s) => ({ priceSar: numeric(s.priceSar ?? s.price), at: new Date(s.at || s.date || 0).getTime() }))
+    .map((s) => {
+      const rawAt = s.at ?? s.date;
+      return {
+        priceSar: numeric(s.priceSar ?? s.price),
+        at: rawAt ? new Date(rawAt).getTime() : Number.NaN,
+      };
+    })
     .filter((s) => Number.isFinite(s.priceSar) && Number.isFinite(s.at))
     .sort((a, b) => a.at - b.at);
   if (clean.length < 2) return { drops: 0, totalDropSar: 0, totalDropPct: 0, urgencyScore: 0 };
@@ -305,12 +269,21 @@ export function analyzePriceHistory(snapshots = []) {
   return { drops, totalDropSar: Math.round(totalDropSar), totalDropPct, urgencyScore };
 }
 
+function adjustedLiquidity(listing) {
+  let score = modelLiquidity(listing.make, listing.model);
+  if (/^(جده|جدة|الرياض|مكه|مكة|الدمام|الخبر)$/i.test(String(listing.city || '').trim())) score += 3;
+  return Math.min(100, score);
+}
+
 export function assessDeal(listingInput, compInputs = [], options = {}) {
   const listing = listingInput.priceSar !== undefined ? listingInput : normalizeListing(listingInput, options);
   const market = estimateMarketValue(listing, compInputs, options.market || {});
   const maintenance = estimateMaintenanceReserve(listing, options.maintenance || {});
-  const liquidity = modelLiquidity(listing.make, listing.model);
+  const liquidity = adjustedLiquidity(listing);
 
+  if (listing.listingKind && listing.listingKind !== 'vehicle') {
+    return decision(listing, market, maintenance, liquidity, 0, 0, 'REJECT_NON_VEHICLE');
+  }
   if (listing.nonCashPriceRisk) {
     return decision(listing, market, maintenance, liquidity, 0, 0, 'REJECT_PRICE_UNRELIABLE');
   }
@@ -318,7 +291,7 @@ export function assessDeal(listingInput, compInputs = [], options = {}) {
     return decision(listing, market, maintenance, liquidity, 0, 0, 'REJECT_MISSING_PRICE');
   }
   if (!market.quickSaleValueSar) {
-    return decision(listing, market, maintenance, liquidity, 0, 0, 'NEEDS_MORE_COMPS');
+    return decision(listing, market, maintenance, liquidity, 0, Math.max(0, market.confidence), 'NEEDS_MORE_COMPS');
   }
 
   const acquisitionCostsSar = options.acquisitionCostsSar ?? 1200;
@@ -338,6 +311,8 @@ export function assessDeal(listingInput, compInputs = [], options = {}) {
   if (listing.engineCode) confidence += 5;
   if (listing.images?.length >= 5) confidence += 3;
   if (listing.trimClaimUnverified) confidence -= 5;
+  if (listing.priceStructureRisk?.level === 'soft') confidence -= 7;
+  confidence -= Math.ceil((listing.sellerRisk?.score || 0) * 0.15);
   confidence = Math.max(0, Math.min(100, Math.round(confidence)));
 
   let status = 'PASS';
@@ -367,6 +342,7 @@ function decision(listing, market, maintenance, liquidity, dealScore, confidence
     scores: {
       deal: Math.round(dealScore),
       mechanicalRisk: maintenance.mechanicalRisk,
+      sellerRisk: Math.round(listing.sellerRisk?.score || 0),
       liquidity: Math.round(liquidity),
       confidence: Math.round(confidence),
     },
@@ -381,7 +357,17 @@ export function rankDeals(listings, compsByKey = new Map(), options = {}) {
     return assessDeal(listing, comps, options);
   });
   return assessed.sort((a, b) => {
-    const priority = { BUY_CANDIDATE: 5, INSPECT: 4, WATCH: 3, NEEDS_MORE_COMPS: 2, PASS: 1, HIGH_RISK: 0, REJECT_PRICE_UNRELIABLE: -1, REJECT_MISSING_PRICE: -2 };
+    const priority = {
+      BUY_CANDIDATE: 6,
+      INSPECT: 5,
+      WATCH: 4,
+      NEEDS_MORE_COMPS: 3,
+      PASS: 2,
+      HIGH_RISK: 1,
+      REJECT_PRICE_UNRELIABLE: 0,
+      REJECT_NON_VEHICLE: -1,
+      REJECT_MISSING_PRICE: -2,
+    };
     return (priority[b.status] ?? 0) - (priority[a.status] ?? 0) || b.scores.deal - a.scores.deal;
   });
 }
