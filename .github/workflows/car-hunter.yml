@@ -5,7 +5,7 @@ on:
     paths:
       - 'src/car-hunter/**'
       - 'test/car-hunter*.test.js'
-      - 'tools/car-hunter.mjs'
+      - 'tools/car-hunter*.mjs'
       - 'ops/car-hunter/**'
       - 'ops/browser/sites.json'
       - 'package.json'
@@ -15,7 +15,7 @@ on:
     paths:
       - 'src/car-hunter/**'
       - 'test/car-hunter*.test.js'
-      - 'tools/car-hunter.mjs'
+      - 'tools/car-hunter*.mjs'
       - 'ops/car-hunter/**'
       - 'ops/browser/sites.json'
       - 'package.json'
@@ -34,4 +34,4 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
-      - run: node --test test/car-hunter.test.js test/car-hunter-collector.test.js
+      - run: node --test test/car-hunter*.test.js
