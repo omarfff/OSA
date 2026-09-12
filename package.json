@@ -13,7 +13,8 @@
     "browser:chaos": "node scripts/browser-chaos.mjs",
     "browser:health": "node tools/osa-browser-runtime.mjs health",
     "revenue:gate": "node tools/revenue-gate.mjs",
-    "car:hunt": "node tools/car-hunter.mjs"
+    "car:hunt": "node tools/car-hunter.mjs",
+    "car:autopilot": "node tools/car-hunter-autopilot.mjs"
   },
   "engines": {
     "node": ">=20"
