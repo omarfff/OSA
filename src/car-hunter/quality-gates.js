@@ -11,12 +11,17 @@ const SOFT_PAYMENT_PATTERNS = [
 ];
 
 const NON_VEHICLE_TITLE_PATTERNS = [
-  { kind: 'parts', re: /قطع\s*غيار|تشليح|صدام|شمعات?|شمعة|مساعد(?:ات)?|سلف|كمبروسر|رديتر|قير\s+للبيع|مكين[هة]\s+للبيع|جنوط?\s+للبيع|كفرات?\s+للبيع/i },
+  {
+    kind: 'parts',
+    re: /قطع\s*غيار|تشليح|(?:قير|جير)\s+للبيع|مكين[هة]\s+للبيع|^(?:مراي(?:ة|ات)|مرايا|فلتر|جنوط|كفرات?|صدام|شمعة|شمعات|اسطب|اصطب|كشاف|رديتر|كمبروسر|سلف|مساعد(?:ات)?|باب|كبوت|رفرف|زجاج)\b/i,
+  },
   { kind: 'rental', re: /للإيجار|للايجار|تأجير|ايجار\s+(?:يومي|شهري|سيارة)/i },
   { kind: 'wanted', re: /^(?:مطلوب|ابحث\s+عن|أبحث\s+عن)/i },
   { kind: 'service', re: /برمجة|ورشة|صيانة\s+سيارات|فحص\s+كمبيوتر|خدمة\s+صيانة/i },
   { kind: 'motorcycle', re: /دباب|دراجة\s+نارية/i },
 ];
+
+const AIRBAG_WORD = '(?:ايرباق|إيرباق|ايرباج|إيرباج|ارباق|أرباق|الارباقات|الابرباج|airbag)';
 
 const RISK_RULES = [
   {
@@ -41,20 +46,20 @@ const RISK_RULES = [
   },
   {
     key: 'engine_changed',
-    bad: /مكين[هة]\s+(?:مغيرة|مغيره|مبدلة|مبدله)|engine\s+replaced/i,
+    bad: /مكين[هة]\s+(?:مغيرة|مغيره|مبدلة|مبدله)|(?:مغير|مغيّر|مبدل|مبدّل)\s+مكين[هة]|engine\s+replaced/i,
     penalty: 20,
     reserve: 7000,
   },
   {
     key: 'gearbox_changed',
-    bad: /(?:قير|جير)\s+(?:مغير|مغيره|مبدل|مبدله)|gearbox\s+replaced/i,
+    bad: /(?:قير|جير)\s+(?:مغير|مغيره|مبدل|مبدله)|(?:مغير|مغيّر|مبدل|مبدّل)\s+(?:قير|جير)|gearbox\s+replaced/i,
     penalty: 18,
     reserve: 6000,
   },
   {
     key: 'airbag_damage',
-    bad: /ايرباق\s+(?:مفتوح|طالع|مضروب)|إيرباق\s+(?:مفتوح|طالع|مضروب)|airbag\s+(?:deployed|fault)/i,
-    good: /(?:ايرباق|إيرباق|airbag)\s+(?:سليم|وكالة|original)/i,
+    bad: new RegExp(`${AIRBAG_WORD}\\s*(?:اليمين|اليسار|الستاره|الستارة)?\\s*(?:مفتوح|مفتوحة|طالع|طالعة|مضروب|مضروبة|deployed|fault)`, 'i'),
+    good: new RegExp(`${AIRBAG_WORD}\\s*(?:سليم|سليمة|وكالة|original)`, 'i'),
     penalty: 25,
     reserve: 7000,
   },
@@ -63,6 +68,12 @@ const RISK_RULES = [
     bad: /رش\s+كامل|مرشوش(?:ة)?\s+كامل/i,
     penalty: 12,
     reserve: 2500,
+  },
+  {
+    key: 'scattered_repaint',
+    bad: /رشوش\s+متفرق[هة]|رش\s+متفرق|مرشوش(?:ة)?\s+متفرق/i,
+    penalty: 8,
+    reserve: 1500,
   },
   {
     key: 'side_repaint',
@@ -76,9 +87,21 @@ const RISK_RULES = [
     penalty: 6,
     reserve: 1000,
   },
+  {
+    key: 'non_gcc_import',
+    bad: /وارد\s+(?:كوريا|كوري|المانيا|ألمانيا|كندا|اليابان|الصين)/i,
+    penalty: 4,
+    reserve: 1000,
+  },
+  {
+    key: 'body_conversion',
+    bad: /محول\s+20\d{2}|تحويل\s+(?:شكل|موديل)|محوّل\s+20\d{2}/i,
+    penalty: 5,
+    reserve: 1500,
+  },
 ];
 
-const UNVERIFIED_TRIM_PATTERNS = [/كت\s*AMG/i, /AMG\s*kit/i, /M\s*Sport\s*kit/i, /كت\s*M/i];
+const UNVERIFIED_TRIM_PATTERNS = [/كت\s*AMG/i, /AMG\s*kit/i, /M\s*Sport\s*kit/i, /M\s*KIT/i, /كت\s*M/i];
 
 export function classifyListingKind({ title = '' } = {}) {
   const t = String(title).trim();
