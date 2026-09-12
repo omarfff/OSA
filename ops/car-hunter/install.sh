@@ -42,8 +42,8 @@ Group=$SERVICE_USER
 WorkingDirectory=$STATE_DIR
 Environment=OSA_CAR_HUNTER_STATE=$STATE_DIR/state.json
 Environment=OSA_CAR_HUNTER_LATEST=$STATE_DIR/latest.json
-Environment=OSA_CAR_HUNTER_MAX_ADS=16
-Environment=OSA_CAR_HUNTER_DELAY_MS=2000
+Environment=OSA_CAR_HUNTER_MAX_ADS=96
+Environment=OSA_CAR_HUNTER_DELAY_MS=1500
 ExecStart=/usr/bin/node $LIB_DIR/tools/car-hunter-autopilot.mjs
 NoNewPrivileges=true
 PrivateTmp=true
