@@ -58,8 +58,7 @@ const RISK_RULES = [
   },
   {
     key: 'airbag_damage',
-    bad: new RegExp(`${AIRBAG_WORD}\\s*(?:اليمين|اليسار|الستاره|الستارة)?\\s*(?:مفتوح|مفتوحة|طالع|طالعة|مضروب|مضروبة|deployed|fault)`, 'i'),
-    good: new RegExp(`${AIRBAG_WORD}\\s*(?:سليم|سليمة|وكالة|original)`, 'i'),
+    bad: new RegExp(`${AIRBAG_WORD}\\s*(?:اليمين|اليسار|المعاون|السائق|الستاره|الستارة)?\\s*(?:مفتوح|مفتوحة|طالع|طالعة|مضروب|مضروبة|deployed|fault)`, 'i'),
     penalty: 25,
     reserve: 7000,
   },
