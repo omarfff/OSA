@@ -12,7 +12,8 @@
     "mcp:preflight": "node tools/mcp-preflight.mjs",
     "browser:chaos": "node scripts/browser-chaos.mjs",
     "browser:health": "node tools/osa-browser-runtime.mjs health",
-    "revenue:gate": "node tools/revenue-gate.mjs"
+    "revenue:gate": "node tools/revenue-gate.mjs",
+    "car:hunt": "node tools/car-hunter.mjs"
   },
   "engines": {
     "node": ">=20"
