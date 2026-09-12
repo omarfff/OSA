@@ -93,7 +93,7 @@ test('cheap asking price is not a deal when all-in cost consumes quick-sale marg
 test('genuine under-market car can become BUY_CANDIDATE only with enough comps and tolerable risk', () => {
   const target = normalizeListing({
     source: 'manual', make: 'BMW', model: '530i', year: 2019,
-    mileage: 110000, price: 56000, engineCode: 'B48', vin: 'WBA00000000000000',
+    mileage: 110000, price: 45000, engineCode: 'B48', vin: 'WBA00000000000000',
     images: Array.from({ length: 6 }, (_, i) => `https://cdn.example/${i}.jpg`),
     description: 'بدي وكالة وصيانة موثقة',
   });
