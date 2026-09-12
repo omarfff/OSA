@@ -3,6 +3,7 @@ const HARD_PAYMENT_PATTERNS = [
   { key: 'waiver', re: /تنازل(?:\s+عن)?(?:\s+السيارة)?/i },
   { key: 'remaining_installments', re: /باقي\s+(?:الأقساط|الاقساط)|متبقي\s+(?:الأقساط|الاقساط)/i },
   { key: 'monthly_payment', re: /قسط\s*(?:شهري)?\s*[:\-]?\s*\d|القسط\s+الشهري/i },
+  { key: 'excluded_import_costs', re: /(?:لا\s*يشمل|لايشمل|من\s+دون|بدون)[^\n.]{0,120}(?:الجمارك|الضريبة|القيمة\s+المضافة)|(?:exclud(?:es|ing)|without)[^\n.]{0,80}(?:customs|vat|tax)/i },
 ];
 
 const SOFT_PAYMENT_PATTERNS = [

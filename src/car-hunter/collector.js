@@ -68,13 +68,16 @@ function parseExplicitPrice(text = '') {
 function parseMileage(text = '') {
   const clean = stripTags(text).replace(/\u2068|\u2069/g, ' ');
   const patterns = [
-    /(?:الممشى|ممشى\s+السيارة|ممشى|العداد|عداد)\s*[:\-]?\s*([\d,.،]+)\s*(الف|ألف|k|كم|كيلو)?/i,
+    /(?:الممشى|ممشى\s+السيارة|ممشى|العداد|عداد)\s*[:\-]?\s*([\d,.،]+)\s*(الف|ألف|k)?\s*(ميل|مايل|miles?|mi|كم|كيلو(?:متر)?|km)?/i,
   ];
   for (const re of patterns) {
     const m = clean.match(re);
     if (!m) continue;
     const n = parseThousandsNumber(m[1], m[2]);
-    if (n != null) return n;
+    if (n == null) continue;
+    const unit = String(m[3] || '').toLowerCase();
+    if (/^(?:ميل|مايل|miles?|mi)$/.test(unit)) return Math.round(n * 1.609344);
+    return n;
   }
   return null;
 }
