@@ -16,10 +16,12 @@ test('collector only allows public haraj pages and rejects internal API paths', 
 
 test('search JSON-LD parses a live-style X5 listing price, mileage and year from public data', () => {
   const html = `<!doctype html><html><head>
-    <script type="application/ld+json">${JSON.stringify({
+    <script id="json-ld-search-results" type="application/ld+json">${JSON.stringify({
       '@context': 'https://schema.org',
-      '@type': 'ItemList',
-      itemListElement: [{
+      '@type': 'SearchResultsPage',
+      mainEntity: {
+        '@type': 'ItemList',
+        itemListElement: [{
         '@type': 'ListItem', position: 1, item: {
           '@context': 'https://schema.org', '@type': 'Thing',
           name: 'BMW x5 2015 للبيع',
@@ -27,7 +29,8 @@ test('search JSON-LD parses a live-style X5 listing price, mileage and year from
           image: ['https://mimg.example/x5-1.jpg', 'https://mimg.example/x5-2.jpg'],
           url: 'https://haraj.com.sa/11188437904/BMW_x5_2015_للبيع/',
         },
-      }],
+        }],
+      },
     })}</script></head><body></body></html>`;
 
   const [listing] = parseHarajSearchHtml(html, { make: 'BMW' });

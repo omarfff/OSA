@@ -1,4 +1,8 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { normalizeListing } from './index.js';
+
+const execFileAsync = promisify(execFile);
 
 export const PUBLIC_SEARCHES = Object.freeze([
   { name: 'haraj-bmw', url: 'https://haraj.com.sa/search/BMW/', make: 'BMW' },
@@ -106,6 +110,9 @@ function findItemNodes(value, out = []) {
   if (Array.isArray(value)) {
     for (const item of value) findItemNodes(item, out);
     return out;
+  }
+  if (value.mainEntity && typeof value.mainEntity === 'object') {
+    findItemNodes(value.mainEntity, out);
   }
   if (value.itemListElement && Array.isArray(value.itemListElement)) {
     for (const element of value.itemListElement) {
@@ -262,17 +269,39 @@ export function parseHarajPublicPostHtml(html, url, hints = {}) {
 
 async function fetchText(url, options = {}) {
   const safeUrl = assertPublicHarajUrl(url);
-  const res = await (options.fetchImpl || fetch)(safeUrl, {
-    redirect: 'follow',
-    headers: {
-      'user-agent': options.userAgent || 'Mozilla/5.0 (compatible; OSA-Car-Hunter/1.1; public-search-monitor)',
-      'accept-language': 'ar-SA,ar;q=0.9,en;q=0.6',
-      accept: 'text/html,application/xhtml+xml',
-    },
-    signal: options.signal,
-  });
-  if (!res.ok) throw new Error(`public_fetch_failed:${res.status}`);
-  return await res.text();
+  const userAgent = options.userAgent || 'Mozilla/5.0';
+  if (options.fetchImpl) {
+    const res = await options.fetchImpl(safeUrl, {
+      redirect: 'follow',
+      headers: {
+        'user-agent': userAgent,
+        'accept-language': 'ar-SA,ar;q=0.9,en;q=0.6',
+        accept: 'text/html,application/xhtml+xml',
+      },
+      signal: options.signal,
+    });
+    if (!res.ok) throw new Error(`public_fetch_failed:${res.status}`);
+    return await res.text();
+  }
+
+  const curlBin = options.curlBin || '/usr/bin/curl';
+  const args = [
+    '-fsSL', '--compressed', '--connect-timeout', '8', '--max-time', '20',
+    '-A', userAgent,
+    '-H', 'Accept-Language: ar-SA,ar;q=0.9,en;q=0.6',
+    '-H', 'Accept: text/html,application/xhtml+xml',
+    safeUrl,
+  ];
+  try {
+    const { stdout } = await execFileAsync(curlBin, args, {
+      encoding: 'utf8',
+      maxBuffer: 4 * 1024 * 1024,
+      signal: options.signal,
+    });
+    return stdout;
+  } catch (error) {
+    throw new Error(`public_fetch_failed:curl:${error?.code ?? 'unknown'}`);
+  }
 }
 
 function sleep(ms) {
