@@ -1,0 +1,37 @@
+name: Car Hunter
+
+on:
+  pull_request:
+    paths:
+      - 'src/car-hunter/**'
+      - 'test/car-hunter*.test.js'
+      - 'tools/car-hunter*.mjs'
+      - 'ops/car-hunter/**'
+      - 'ops/browser/sites.json'
+      - 'package.json'
+      - '.github/workflows/car-hunter.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/car-hunter/**'
+      - 'test/car-hunter*.test.js'
+      - 'tools/car-hunter*.mjs'
+      - 'ops/car-hunter/**'
+      - 'ops/browser/sites.json'
+      - 'package.json'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: node --test test/car-hunter*.test.js
