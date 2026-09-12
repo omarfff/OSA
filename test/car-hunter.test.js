@@ -85,6 +85,18 @@ test('parts/rental noise is rejected as non-vehicle', () => {
   assert.equal(result.status, 'REJECT_NON_VEHICLE');
 });
 
+test('import price that excludes customs or VAT is rejected as unreliable', () => {
+  const listing = normalizeListing({
+    source: 'haraj', make: 'BMW', model: '540I', year: 2026, mileage: 19312, price: 257132,
+    title: '2026 BMW 540 i xDrive',
+    description: 'السعر شامل الشحن واصل إلى ميناء جدة الإسلامي، السعر لا يشمل الجمارك والضريبة 20٪',
+  });
+  const result = assessDeal(listing, []);
+  assert.equal(listing.priceStructureRisk.level, 'hard');
+  assert.ok(listing.priceStructureRisk.reasons.includes('excluded_import_costs'));
+  assert.equal(result.status, 'REJECT_PRICE_UNRELIABLE');
+});
+
 test('commercial vehicles are rejected from passenger-car deal ranking', () => {
   const listing = normalizeListing({ source: 'haraj', make: 'Mercedes-Benz', title: 'شاحنة مرسيدس 2006', price: 144000 });
   const result = assessDeal(listing, []);

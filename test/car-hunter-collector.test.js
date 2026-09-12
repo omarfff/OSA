@@ -110,6 +110,18 @@ test('specific search hint is retained when the ad text actually matches it', ()
   assert.equal(listing.model, '530I');
 });
 
+test('mileage in miles is converted to kilometers before scoring', () => {
+  const html = `<script type="application/ld+json">${JSON.stringify({
+    '@type': 'SearchResultsPage', mainEntity: { '@type': 'ItemList', itemListElement: [{ '@type': 'ListItem', item: {
+      '@type': 'Thing', name: '2026 BMW 540 i xDrive',
+      description: 'الموديل: 2026 الممشى: 12 الف ميل السعر: 257132 ريال',
+      url: 'https://haraj.com.sa/11184135023/2026_BMW_540_i_xDrive/',
+    }}] },
+  })}</script>`;
+  const [listing] = parseHarajSearchHtml(html, { make: 'BMW', model: '540I' });
+  assert.equal(listing.mileageKm, 19312);
+});
+
 test('structured search extraction deduplicates links', () => {
   const item = {
     '@type': 'Thing', name: 'BMW X5 2015', description: 'الموديل 2015 الممشى 180 الف المطلوب 53 الف',
