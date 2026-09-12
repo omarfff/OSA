@@ -41,7 +41,7 @@ test('Haraj shared-post adapter converts thousand-style price and mileage safely
   assert.ok(n.riskFlags.some((f) => f.key === 'side_repaint'));
 });
 
-test('down-payment and installment ads are rejected before market scoring', () => {
+test('hard down-payment/installment structure is rejected before market scoring', () => {
   const listing = normalizeListing({
     source: 'manual',
     make: 'BMW',
@@ -56,7 +56,36 @@ test('down-payment and installment ads are rejected before market scoring', () =
   assert.equal(result.status, 'REJECT_PRICE_UNRELIABLE');
 });
 
-test('full-repaint / chassis / overheat language increases reserve and risk', () => {
+test('mentioning finance alone is soft risk, not an automatic rejection', () => {
+  const listing = normalizeListing({
+    source: 'manual', make: 'Mercedes-Benz', model: 'C200', year: 2019,
+    mileage: 120000, price: 80000, engineCode: 'M274',
+    description: 'السعر كاش 80 ألف ويوجد تمويل عن طريق البنك',
+  });
+  assert.equal(listing.nonCashPriceRisk, false);
+  assert.equal(listing.priceStructureRisk.level, 'soft');
+});
+
+test('positive chassis guarantee is not treated as chassis damage', () => {
+  const listing = normalizeListing({
+    source: 'manual', make: 'BMW', model: '530i', year: 2019,
+    mileage: 130000, price: 70000, engineCode: 'B48',
+    description: 'مكينة شرط قير شرط شاص شرط والبدي نظيف',
+  });
+  assert.equal(listing.riskFlags.some((f) => f.key === 'chassis'), false);
+});
+
+test('parts/rental noise is rejected as non-vehicle', () => {
+  const listing = normalizeListing({
+    source: 'haraj', make: 'BMW', title: 'شمعات BMW 500 2020', price: 800,
+    description: 'قطع غيار للبيع',
+  });
+  const result = assessDeal(listing, []);
+  assert.equal(listing.listingKind, 'parts');
+  assert.equal(result.status, 'REJECT_NON_VEHICLE');
+});
+
+test('explicit full-repaint / chassis damage / overheat language increases reserve and risk', () => {
   const risky = normalizeListing({
     source: 'manual',
     make: 'BMW',
@@ -65,7 +94,7 @@ test('full-repaint / chassis / overheat language increases reserve and risk', ()
     mileage: 299000,
     price: 37000,
     engineCode: 'N55',
-    description: 'مرشوش كامل ويوجد شاص وسبق حرارة',
+    description: 'مرشوش كامل وفيها ضربة شاص وسبق رفعت الحرارة',
   });
   const result = assessDeal(risky, [
     normalizeListing({ source: 'manual', make: 'BMW', model: 'X5', year: 2015, mileage: 270000, price: 58000, engineCode: 'N55' }),
@@ -108,6 +137,22 @@ test('genuine under-market car can become BUY_CANDIDATE only with enough comps a
   assert.equal(result.status, 'BUY_CANDIDATE');
   assert.ok(result.netUpsideSar > 4000);
   assert.ok(result.scores.confidence >= 65);
+});
+
+test('high-volume seller reduces confidence without pretending the car itself is mechanically bad', () => {
+  const target = normalizeListing({
+    source: 'manual', make: 'BMW', model: '530i', year: 2019,
+    mileage: 110000, price: 45000, engineCode: 'B48', vin: 'WBA00000000000000',
+    sellerStats: { activeVehicleListings: 25, accountAgeDays: 500 },
+  });
+  assert.ok(target.sellerRisk.score >= 30);
+  const result = assessDeal(target, [
+    normalizeListing({ source: 'manual', make: 'BMW', model: '530i', year: 2019, mileage: 100000, price: 80000 }),
+    normalizeListing({ source: 'manual', make: 'BMW', model: '530i', year: 2019, mileage: 120000, price: 79000 }),
+    normalizeListing({ source: 'manual', make: 'BMW', model: '530i', year: 2019, mileage: 90000, price: 82000 }),
+  ]);
+  assert.equal(result.scores.sellerRisk, target.sellerRisk.score);
+  assert.ok(result.scores.mechanicalRisk < 75);
 });
 
 test('fingerprint ignores price changes so relisted vehicle can retain identity', () => {
