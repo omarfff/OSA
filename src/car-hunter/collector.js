@@ -40,7 +40,7 @@ function numeric(value) {
 function parseThousandsNumber(rawNumber, suffix = '') {
   const n = numeric(rawNumber);
   if (!Number.isFinite(n)) return null;
-  return /(?:الف|ألف|k)\b/i.test(String(suffix)) ? Math.round(n * 1000) : Math.round(n);
+  return /(?:الف|ألف|k)/i.test(String(suffix)) ? Math.round(n * 1000) : Math.round(n);
 }
 
 function parseExplicitPrice(text = '') {
