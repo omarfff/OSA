@@ -81,6 +81,8 @@ sudo systemctl start osa-car-hunter.service
 sudo cat /var/lib/osa-car-hunter/latest.json
 ```
 
+`latest.json` is the operational handoff: it contains a summary, `alerts` for only `BUY_CANDIDATE`/`INSPECT`, the ranked top set, and bounded collection errors. This makes it easy for another OSA surface to read results without coupling it to the collector.
+
 ## Haraj units
 
 Haraj may expose compact numbers such as price `55` for 55,000 SAR and mileage `205` for 205,000 km in listing metadata. The Haraj normalizer applies the thousand conversion only for Haraj source records and only when values are below 1,000. Non-vehicle search noise is rejected before deal ranking.
