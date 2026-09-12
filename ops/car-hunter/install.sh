@@ -17,13 +17,17 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   useradd --system --home-dir "$STATE_DIR" --create-home --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 
-install -d -o root -g root -m 0755 "$LIB_DIR" "$LIB_DIR/src"
+install -d -o root -g root -m 0755 "$LIB_DIR" "$LIB_DIR/src" "$LIB_DIR/tools"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 "$STATE_DIR"
 rm -rf "$LIB_DIR/src/car-hunter"
 cp -a "$ROOT_DIR/src/car-hunter" "$LIB_DIR/src/car-hunter"
-install -o root -g root -m 0644 "$ROOT_DIR/tools/car-hunter-autopilot.mjs" "$LIB_DIR/car-hunter-autopilot.mjs"
-chown -R root:root "$LIB_DIR/src/car-hunter"
+install -o root -g root -m 0644 "$ROOT_DIR/tools/car-hunter-autopilot.mjs" "$LIB_DIR/tools/car-hunter-autopilot.mjs"
+chown -R root:root "$LIB_DIR/src/car-hunter" "$LIB_DIR/tools"
 find "$LIB_DIR/src/car-hunter" -type f -exec chmod 0644 {} +
+
+# Validate the installed module graph before touching systemd.
+/usr/bin/node --check "$LIB_DIR/tools/car-hunter-autopilot.mjs"
+/usr/bin/node -e "import('file://$LIB_DIR/src/car-hunter/autopilot.js').then(()=>process.exit(0)).catch(e=>{console.error(e);process.exit(1)})"
 
 cat > "$UNIT" <<UNITEOF
 [Unit]
@@ -40,7 +44,7 @@ Environment=OSA_CAR_HUNTER_STATE=$STATE_DIR/state.json
 Environment=OSA_CAR_HUNTER_LATEST=$STATE_DIR/latest.json
 Environment=OSA_CAR_HUNTER_MAX_ADS=16
 Environment=OSA_CAR_HUNTER_DELAY_MS=2000
-ExecStart=/usr/bin/node $LIB_DIR/car-hunter-autopilot.mjs
+ExecStart=/usr/bin/node $LIB_DIR/tools/car-hunter-autopilot.mjs
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
