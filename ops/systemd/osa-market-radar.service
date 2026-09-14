@@ -1,0 +1,25 @@
+[Unit]
+Description=OSA Invisible-Hand Market Radar
+After=network-online.target osa-brain.service
+Wants=network-online.target
+Requires=osa-brain.service
+
+[Service]
+Type=oneshot
+User=osa-brain
+Group=osa-brain
+EnvironmentFile=-/etc/osa/market-radar.env
+ExecStart=/usr/bin/node /usr/local/lib/osa/market-radar.mjs
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/osa-market-radar
+UMask=0077
