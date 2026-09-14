@@ -1,0 +1,13 @@
+[Unit]
+Description=Run OSA Invisible-Hand Market Radar twice daily
+
+[Timer]
+OnBootSec=12min
+OnUnitActiveSec=12h
+Persistent=true
+RandomizedDelaySec=10min
+AccuracySec=2min
+Unit=osa-market-radar.service
+
+[Install]
+WantedBy=timers.target
