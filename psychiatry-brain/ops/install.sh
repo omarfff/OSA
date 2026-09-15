@@ -14,10 +14,13 @@ LIB_DIR="/usr/local/lib/osa-psychiatry"
 SHARE_DIR="/usr/local/share/osa-psychiatry"
 KNOWLEDGE_DIR="$SHARE_DIR/knowledge"
 STATE_DIR="/var/lib/osa-psychiatry-brain"
+VISUAL_DIR="$STATE_DIR/visuals"
 CASE_DIR="/var/lib/osa-psychiatry-cases"
 UNIT="/etc/systemd/system/osa-psychiatry-brain.service"
 HARVEST_UNIT="/etc/systemd/system/osa-psychiatry-case-harvest.service"
 HARVEST_TIMER="/etc/systemd/system/osa-psychiatry-case-harvest.timer"
+VISUAL_UNIT="/etc/systemd/system/osa-psychiatry-visuals.service"
+VISUAL_TIMER="/etc/systemd/system/osa-psychiatry-visuals.timer"
 
 if ! getent group "$CASE_GROUP" >/dev/null 2>&1; then
   groupadd --system "$CASE_GROUP"
@@ -34,7 +37,7 @@ fi
 
 install -d -o root -g root -m 0755 "$LIB_DIR"
 install -d -o root -g "$SERVICE_USER" -m 0750 "$SHARE_DIR" "$KNOWLEDGE_DIR"
-install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 "$STATE_DIR"
+install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 "$STATE_DIR" "$VISUAL_DIR"
 install -d -o "$HARVEST_USER" -g "$CASE_GROUP" -m 0750 "$CASE_DIR"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/server.mjs" "$LIB_DIR/server.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/learning.mjs" "$LIB_DIR/learning.mjs"
@@ -48,6 +51,8 @@ install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/documentation-lab-v2.mj
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/consultant-mode.mjs" "$LIB_DIR/consultant-mode.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/case-corpus.mjs" "$LIB_DIR/case-corpus.mjs"
 install -o root -g "$CASE_GROUP" -m 0640 "$SRC_DIR/src/case-harvester.mjs" "$LIB_DIR/case-harvester.mjs"
+install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/visual-cortex.mjs" "$LIB_DIR/visual-cortex.mjs"
+install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/visual-worker.mjs" "$LIB_DIR/visual-worker.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/adaptive-server.mjs" "$LIB_DIR/adaptive-server.mjs"
 install -o root -g "$SERVICE_USER" -m 0640 "$SRC_DIR/src/training-server.mjs" "$LIB_DIR/training-server.mjs"
 
@@ -75,6 +80,7 @@ Environment=PSYCHIATRY_OLLAMA_URL=http://127.0.0.1:11434
 Environment=PSYCHIATRY_BRAIN_KNOWLEDGE_DIR=$KNOWLEDGE_DIR
 Environment=PSYCHIATRY_BRAIN_STATE_DIR=$STATE_DIR
 Environment=PSYCHIATRY_CASE_CORPUS_DIR=$CASE_DIR
+Environment=PSYCHIATRY_VISUAL_DIR=$VISUAL_DIR
 ExecStart=/usr/bin/node $LIB_DIR/training-server.mjs
 Restart=on-failure
 RestartSec=3
@@ -154,13 +160,64 @@ Unit=osa-psychiatry-case-harvest.service
 WantedBy=timers.target
 UNITEOF
 
-# Initial corpus bootstrap: exactly the requested first milestone, at least 1,000 OA psychiatric case records.
+cat > "$VISUAL_UNIT" <<UNITEOF
+[Unit]
+Description=Psychiatry Visual Cortex Adaptive Infographic Worker
+After=osa-psychiatry-brain.service
+Requires=osa-psychiatry-brain.service
+
+[Service]
+Type=oneshot
+User=$SERVICE_USER
+Group=$SERVICE_USER
+WorkingDirectory=$STATE_DIR
+Environment=PSYCHIATRY_BRAIN_LOCAL_URL=http://127.0.0.1:8791
+Environment=PSYCHIATRY_VISUAL_DIR=$VISUAL_DIR
+ExecStart=/usr/bin/node $LIB_DIR/visual-worker.mjs 3
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+ReadOnlyPaths=$LIB_DIR $SHARE_DIR $CASE_DIR
+ReadWritePaths=$STATE_DIR
+UMask=0077
+UNITEOF
+
+cat > "$VISUAL_TIMER" <<'UNITEOF'
+[Unit]
+Description=Daily Adaptive Psychiatry Visual Generation
+
+[Timer]
+OnCalendar=*-*-* 05:30:00
+Persistent=true
+RandomizedDelaySec=3600
+Unit=osa-psychiatry-visuals.service
+
+[Install]
+WantedBy=timers.target
+UNITEOF
+
+# Keep the previously requested global OA case corpus bootstrapped.
 if [ ! -f "$CASE_DIR/stats.json" ] || [ "$(node -e "try{const s=require('$CASE_DIR/stats.json');process.stdout.write(String(s.count||0))}catch{process.stdout.write('0')}")" -lt 1000 ]; then
   timeout 300 runuser -u "$HARVEST_USER" -- env PSYCHIATRY_CASE_CORPUS_DIR="$CASE_DIR" /usr/bin/node "$LIB_DIR/case-harvester.mjs" 1000 1000
 fi
 
 systemctl daemon-reload
 systemctl enable --now osa-psychiatry-case-harvest.timer
+systemctl enable --now osa-psychiatry-visuals.timer
 systemctl enable --now osa-psychiatry-brain.service
 systemctl restart osa-psychiatry-brain.service
 sleep 2
@@ -168,6 +225,8 @@ systemctl is-active --quiet osa-psychiatry-brain.service
 curl -fsS --max-time 10 http://127.0.0.1:8791/health
 printf '\n'
 curl -fsS --max-time 10 http://127.0.0.1:8791/training/capabilities
+printf '\n'
+curl -fsS --max-time 10 http://127.0.0.1:8791/visuals/capabilities
 printf '\n'
 curl -fsS --max-time 10 http://127.0.0.1:8791/cases/corpus/stats
 printf '\n'
