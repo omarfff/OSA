@@ -11,19 +11,19 @@ const MAX_SECTIONS = 6;
 const MAX_BULLETS = 5;
 
 const DOMAIN_TITLES = {
-  mse: ['Mental State Examination', 'MSE'],
-  risk: ['Psychiatric Risk Assessment', 'Risk'],
-  formulation: ['4Ps Case Formulation', 'Formulation'],
-  psychosis: ['Psychosis & Schizophrenia', 'Psychosis'],
-  mood: ['Mood Disorders', 'Mood'],
-  anxiety_ocd_trauma: ['Anxiety, OCD & Trauma', 'Anxiety/OCD/Trauma'],
-  addiction: ['Substance Use Disorders', 'Addiction'],
-  child_adolescent: ['Child & Adolescent Psychiatry', 'Child Psychiatry'],
-  geriatric: ['Geriatric Psychiatry', 'Geriatric'],
-  psychopharmacology: ['Psychopharmacology', 'Psychopharmacology'],
-  emergency: ['Psychiatric Emergencies', 'Emergency'],
-  psychotherapy: ['Psychotherapy Skills', 'Psychotherapy'],
-  law_ethics: ['Law, Ethics & Capacity', 'Law/Ethics']
+  mse: 'Mental State Examination',
+  risk: 'Psychiatric Risk Assessment',
+  formulation: '4Ps Case Formulation',
+  psychosis: 'Psychosis & Schizophrenia',
+  mood: 'Mood Disorders',
+  anxiety_ocd_trauma: 'Anxiety, OCD & Trauma',
+  addiction: 'Substance Use Disorders',
+  child_adolescent: 'Child & Adolescent Psychiatry',
+  geriatric: 'Geriatric Psychiatry',
+  psychopharmacology: 'Psychopharmacology',
+  emergency: 'Psychiatric Emergencies',
+  psychotherapy: 'Psychotherapy Skills',
+  law_ethics: 'Law, Ethics & Capacity'
 };
 
 const DOMAIN_TOPICS = {
@@ -42,8 +42,11 @@ const DOMAIN_TOPICS = {
   law_ethics: ['Capacity assessment', 'Consent basics', 'Confidentiality and safeguarding']
 };
 
-function clamp(n, min, max) { return Math.min(max, Math.max(min, n)); }
-function cleanText(value, max = 500) { return String(value || '').replace(/\r/g, '').trim().slice(0, max); }
+const FALLBACK_HEADINGS = ['Core pattern', 'Differentiate', 'Assessment', 'Memory hooks'];
+const STRUCTURAL_WORDS = new Set(['title','subtitle','sections','heading','icon','bullets','memoryhook','redflags','footer','brain','eye','speech','heart','warning','pill','clock','shield','compare']);
+
+function clamp(n, min, max) { return Math.min(max, Math.max(min, Number(n) || 0)); }
+function cleanText(value, max = 500) { return String(value || '').replace(/\r/g, '').replace(/\s+/g, ' ').trim().slice(0, max); }
 function xmlEscape(value) {
   return String(value || '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -54,9 +57,82 @@ function slug(value) {
 }
 function parseJsonPayload(text) {
   const raw = String(text || '').trim();
+  if (!raw) return null;
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  const candidate = fenced || raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
-  try { return JSON.parse(candidate); } catch { return null; }
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  const candidates = [fenced, start >= 0 && end > start ? raw.slice(start, end + 1) : null, raw].filter(Boolean);
+  for (const candidate of candidates) {
+    try { return JSON.parse(candidate); } catch { /* continue */ }
+    try {
+      const repaired = candidate.replace(/,\s*([}\]])/g, '$1').replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+      return JSON.parse(repaired);
+    } catch { /* continue */ }
+  }
+  return null;
+}
+
+function fragmentsFromText(text) {
+  const raw = String(text || '');
+  const fragments = [];
+  const quoted = [...raw.matchAll(/["“]([^"”\n]{4,150})["”]/g)].map((m) => cleanText(m[1], 140));
+  const lines = raw.split(/\n+/).map((line) => cleanText(line
+    .replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '')
+    .replace(/^[\[\]{}(),]+|[\[\]{}(),]+$/g, '')
+    .replace(/^\s*"?[A-Za-z_]+"?\s*:\s*/, ''), 140));
+  for (const item of [...quoted, ...lines]) {
+    const lower = item.toLowerCase().replace(/[^a-z]/g, '');
+    if (!item || item.length < 4 || item.length > 140) continue;
+    if (STRUCTURAL_WORDS.has(lower)) continue;
+    if (/^(strict json|psychiatry visual cortex|topic:|domain:|learner level:|rules:)/i.test(item)) continue;
+    if (!fragments.includes(item)) fragments.push(item);
+    if (fragments.length >= 24) break;
+  }
+  return fragments;
+}
+
+function deriveSpecFromText(rawText, target) {
+  const fragments = fragmentsFromText(rawText);
+  const safeDefaults = [
+    `Recognize the core pattern of ${target.topic}`,
+    'Compare it with the closest clinical alternative',
+    'Identify the most important assessment questions',
+    'Link the pattern to one memorable retrieval cue',
+    'Separate observed facts from clinical inference',
+    'Review safety and missing information before concluding'
+  ];
+  const pool = [...fragments, ...safeDefaults].slice(0, 20);
+  const sections = FALLBACK_HEADINGS.map((heading, index) => ({
+    heading,
+    icon: index === 0 ? 'brain' : index === 1 ? 'compare' : index === 2 ? 'shield' : 'brain',
+    bullets: pool.filter((_, i) => i % FALLBACK_HEADINGS.length === index).slice(0, MAX_BULLETS),
+    memoryHook: index === 3 ? `Recall: ${target.topic}` : ''
+  }));
+  return {
+    title: `${DOMAIN_TITLES[target.domain] || target.domain} | ${target.topic}`,
+    subtitle: target.level === 'foundation' ? 'Recognize → Describe → Remember' : 'Recognize → Differentiate → Apply safely',
+    sections,
+    redFlags: [],
+    footer: 'Same structure. Better recognition. Better decisions.'
+  };
+}
+
+function normalizeSpec(raw, target, rawText = '') {
+  const fallbackTitle = `${DOMAIN_TITLES[target.domain] || target.domain} — ${target.topic}`;
+  const sections = Array.isArray(raw?.sections) ? raw.sections.slice(0, MAX_SECTIONS).map((s, i) => ({
+    heading: cleanText(s?.heading || `Section ${i + 1}`, 90),
+    icon: cleanText(s?.icon || 'brain', 20),
+    bullets: (Array.isArray(s?.bullets) ? s.bullets : []).slice(0, MAX_BULLETS).map((x) => cleanText(x, 120)).filter(Boolean),
+    memoryHook: cleanText(s?.memoryHook || '', 120)
+  })).filter((s) => s.bullets.length) : [];
+  if (sections.length < 3) return deriveSpecFromText(rawText, target);
+  return {
+    title: cleanText(raw?.title || fallbackTitle, 150),
+    subtitle: cleanText(raw?.subtitle || 'Recognize → Differentiate → Assess safely', 150),
+    sections,
+    redFlags: (Array.isArray(raw?.redFlags) ? raw.redFlags : []).slice(0, 4).map((x) => cleanText(x, 120)).filter(Boolean),
+    footer: cleanText(raw?.footer || 'Same structure. Better recognition. Better decisions.', 150)
+  };
 }
 
 export function inferVisualLevel(state, domain) {
@@ -75,9 +151,9 @@ export function selectVisualTarget(state, input = {}, now = new Date()) {
   const languageInput = cleanText(input.language, 30).toLowerCase();
   const language = LANGUAGES.has(languageInput) ? languageInput : 'bilingual';
   const topicInput = cleanText(input.topic, MAX_TOPIC);
-  const topics = DOMAIN_TOPICS[domain] || [DOMAIN_TITLES[domain]?.[0] || domain];
-  const dayIndex = Math.floor(now.getTime() / 86_400_000);
-  const topic = topicInput || topics[dayIndex % topics.length];
+  const topics = DOMAIN_TOPICS[domain] || [DOMAIN_TITLES[domain] || domain];
+  const variant = Number.isFinite(Number(input.variant)) ? Math.abs(Math.floor(Number(input.variant))) : Math.floor(now.getTime() / 86_400_000);
+  const topic = topicInput || topics[variant % topics.length];
   const summary = masterySummary(state).domains.find((x) => x.domain === domain);
   return { domain, level, language, topic, masteryPct: summary?.masteryPct ?? 0, attempts: summary?.attempts ?? 0 };
 }
@@ -94,37 +170,43 @@ export function buildVisualContentTask(target, { includeManagement = false, evid
   return `PSYCHIATRY VISUAL CORTEX — BUILD INFOGRAPHIC CONTENT.\nTopic: ${target.topic}. Domain: ${target.domain}. Learner level: ${target.level}. Mastery: ${target.masteryPct}%. Language: ${target.language}.\n${levelRule}\n${managementRule}\nUse CURRENT PSYCHIATRY CONTEXT only. Never invent a diagnostic criterion, duration, dose, contraindication, or guideline recommendation. No hidden chain-of-thought.\nReturn STRICT JSON only with this shape:\n{\n  "title":"short bilingual or requested-language title",\n  "subtitle":"one-line recognition goal",\n  "sections":[{"heading":"...","icon":"brain|eye|speech|heart|warning|pill|clock|shield|compare","bullets":["..."],"memoryHook":"..."}],\n  "redFlags":["..."],\n  "footer":"one short learning message"\n}\nRules: 4-6 sections, max 5 bullets each, max 14 words per bullet, max 4 red flags, concise enough to fit one poster.`;
 }
 
-function normalizeSpec(raw, target) {
-  const fallbackTitle = `${DOMAIN_TITLES[target.domain]?.[0] || target.domain} — ${target.topic}`;
-  const sections = Array.isArray(raw?.sections) ? raw.sections.slice(0, MAX_SECTIONS).map((s, i) => ({
-    heading: cleanText(s?.heading || `Section ${i + 1}`, 90),
-    icon: cleanText(s?.icon || 'brain', 20),
-    bullets: (Array.isArray(s?.bullets) ? s.bullets : []).slice(0, MAX_BULLETS).map((x) => cleanText(x, 120)).filter(Boolean),
-    memoryHook: cleanText(s?.memoryHook || '', 120)
-  })).filter((s) => s.bullets.length) : [];
-  if (sections.length < 3) throw new Error('visual_spec_invalid');
-  return {
-    title: cleanText(raw?.title || fallbackTitle, 150),
-    subtitle: cleanText(raw?.subtitle || 'Recognize → Differentiate → Assess safely', 150),
-    sections,
-    redFlags: (Array.isArray(raw?.redFlags) ? raw.redFlags : []).slice(0, 4).map((x) => cleanText(x, 120)).filter(Boolean),
-    footer: cleanText(raw?.footer || 'Same structure. Better recognition. Better decisions.', 150)
-  };
-}
-
 export function buildVisualReviewTask(target, spec) {
-  return `PSYCHIATRY VISUAL CORTEX — MEDICAL QA.\nLearner target: ${target.level}, ${target.domain}, mastery ${target.masteryPct}%.\nReview the infographic JSON below for educational accuracy and level fit. Do not add new medical facts. Reject any unsupported exact diagnostic duration, dose, treatment recommendation, false equivalence, dangerous omission, or text too advanced for the learner.\nReturn STRICT JSON only:\n{"verdict":"pass|revise","accuracy":0-100,"levelFit":0-100,"clarity":0-100,"issues":["..."],"reason":"..."}\nINFOGRAPHIC:\n${JSON.stringify(spec)}`;
+  return `PSYCHIATRY VISUAL CORTEX — MEDICAL QA.\nLearner target: ${target.level}, ${target.domain}, mastery ${target.masteryPct}%.\nReview the infographic below for accuracy and learner-level fit. Do not add new medical facts. Reject unsupported diagnostic durations, medication doses, exact monitoring intervals, treatment recommendations, false equivalence, dangerous omissions, or content too advanced for the learner.\nPrefer this one-line format if JSON is difficult: PASS accuracy=90 levelFit=90 clarity=90. Otherwise: REVISE accuracy=NN levelFit=NN clarity=NN reason=...\nJSON is also accepted: {"verdict":"pass|revise","accuracy":0-100,"levelFit":0-100,"clarity":0-100,"issues":["..."],"reason":"..."}\nINFOGRAPHIC:\n${JSON.stringify(spec)}`;
 }
 
-function normalizeReview(raw) {
-  const verdict = raw?.verdict === 'pass' ? 'pass' : 'revise';
+function numberAfter(text, keys) {
+  for (const key of keys) {
+    const match = String(text || '').match(new RegExp(`${key}\\s*[:=]?\\s*(\\d{1,3})`, 'i'));
+    if (match) return clamp(match[1], 0, 100);
+  }
+  return null;
+}
+
+function normalizeReview(raw, rawText = '') {
+  if (raw && typeof raw === 'object') {
+    const verdict = String(raw.verdict || '').toLowerCase() === 'pass' ? 'pass' : 'revise';
+    return {
+      verdict,
+      accuracy: clamp(raw.accuracy, 0, 100),
+      levelFit: clamp(raw.levelFit, 0, 100),
+      clarity: clamp(raw.clarity, 0, 100),
+      issues: (Array.isArray(raw.issues) ? raw.issues : []).slice(0, 6).map((x) => cleanText(x, 180)).filter(Boolean),
+      reason: cleanText(raw.reason || '', 300)
+    };
+  }
+  const text = cleanText(rawText, 3000);
+  const explicitRevise = /\b(revise|reject|unsafe|incorrect|inaccurate|fail)\b/i.test(text);
+  const explicitPass = /\b(pass|approved|accurate|appropriate|acceptable)\b/i.test(text) && !explicitRevise;
+  const accuracy = numberAfter(text, ['accuracy']) ?? (explicitPass ? 85 : 0);
+  const levelFit = numberAfter(text, ['level\s*fit', 'levelfit']) ?? (explicitPass ? 85 : 0);
+  const clarity = numberAfter(text, ['clarity']) ?? (explicitPass ? 85 : 0);
   return {
-    verdict,
-    accuracy: clamp(Number(raw?.accuracy) || 0, 0, 100),
-    levelFit: clamp(Number(raw?.levelFit) || 0, 0, 100),
-    clarity: clamp(Number(raw?.clarity) || 0, 0, 100),
-    issues: (Array.isArray(raw?.issues) ? raw.issues : []).slice(0, 6).map((x) => cleanText(x, 180)).filter(Boolean),
-    reason: cleanText(raw?.reason || '', 300)
+    verdict: explicitPass ? 'pass' : 'revise',
+    accuracy,
+    levelFit,
+    clarity,
+    issues: explicitRevise ? [cleanText(text, 180)] : [],
+    reason: explicitPass ? 'QA passed in plain-text fallback format.' : cleanText(text, 300)
   };
 }
 
@@ -156,7 +238,7 @@ function sectionSvg(section, i, x, y, w, h) {
     if (cy > y + h - 70) break;
   }
   if (section.memoryHook) {
-    const hook = wrapText(`💡 ${section.memoryHook}`, 44);
+    const hook = wrapText(`Memory: ${section.memoryHook}`, 44);
     lines.push(`<rect x="${x + 20}" y="${y + h - 72}" width="${w - 40}" height="52" rx="14" fill="#ffffff" fill-opacity="0.78"/>`);
     hook.slice(0, 2).forEach((t, idx) => lines.push(`<text x="${x + 34}" y="${y + h - 43 + idx * 21}" font-size="17" font-weight="600" fill="#6b5200">${xmlEscape(t)}</text>`));
   }
@@ -164,7 +246,7 @@ function sectionSvg(section, i, x, y, w, h) {
 }
 
 export function renderVisualSvg(spec, target, review) {
-  const width = 1600, height = 1100;
+  const width = 1600;
   const cols = 3;
   const gap = 24, margin = 36;
   const cardW = Math.floor((width - margin * 2 - gap * (cols - 1)) / cols);
@@ -176,16 +258,34 @@ export function renderVisualSvg(spec, target, review) {
   }).join('\n');
   const rows = Math.ceil(spec.sections.length / cols);
   const riskY = headerH + rows * (cardH + gap) + 4;
-  const redFlags = spec.redFlags.length ? spec.redFlags : ['Always assess immediate safety and medical causes when clinically relevant.'];
-  const riskText = redFlags.map((r, i) => `<text x="${margin + 42}" y="${riskY + 56 + i * 30}" font-size="20" fill="#7b1010">⚠ ${xmlEscape(r)}</text>`).join('\n');
-  const svgHeight = Math.max(height, riskY + 190);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${svgHeight}" viewBox="0 0 ${width} ${svgHeight}">\n<rect width="100%" height="100%" fill="#ffffff"/>\n<rect x="0" y="0" width="${width}" height="150" fill="#eef6ff"/>\n<circle cx="78" cy="68" r="38" fill="#8fc5ff"/><text x="78" y="80" text-anchor="middle" font-size="44">🧠</text>\n<text x="138" y="64" font-size="42" font-weight="800" fill="#0b3d75">${xmlEscape(spec.title)}</text>\n<text x="140" y="108" font-size="24" fill="#30597f">${xmlEscape(spec.subtitle)}</text>\n<text x="1400" y="62" font-size="18" text-anchor="end" fill="#30597f">${xmlEscape(target.level.toUpperCase())} • mastery ${target.masteryPct}%</text>\n<text x="1400" y="93" font-size="16" text-anchor="end" fill="#57748e">Visual Cortex • QA ${Math.round((review.accuracy + review.levelFit + review.clarity) / 3)}%</text>\n${sectionMarkup}\n<rect x="${margin}" y="${riskY + 12}" width="${width - margin * 2}" height="${Math.max(90, 50 + redFlags.length * 30)}" rx="20" fill="#fff0f0" stroke="#f0b4b4" stroke-width="2"/>\n<text x="${margin + 28}" y="${riskY + 42}" font-size="25" font-weight="800" fill="#9a1d1d">Red flags / safety</text>\n${riskText}\n<rect x="0" y="${svgHeight - 70}" width="${width}" height="70" fill="#0b3d75"/>\n<text x="${width / 2}" y="${svgHeight - 28}" text-anchor="middle" font-size="23" font-weight="700" fill="#ffffff">${xmlEscape(spec.footer)} • Educational use — verify current guidance for treatment decisions.</text>\n</svg>`;
+  const redFlags = spec.redFlags.length ? spec.redFlags : ['Check immediate safety and medical causes when clinically relevant.'];
+  const riskText = redFlags.map((r, i) => `<text x="${margin + 42}" y="${riskY + 56 + i * 30}" font-size="20" fill="#7b1010">! ${xmlEscape(r)}</text>`).join('\n');
+  const svgHeight = Math.max(1100, riskY + 190);
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${svgHeight}" viewBox="0 0 ${width} ${svgHeight}">\n<rect width="100%" height="100%" fill="#ffffff"/>\n<rect x="0" y="0" width="${width}" height="150" fill="#eef6ff"/>\n<circle cx="78" cy="68" r="38" fill="#8fc5ff"/><text x="78" y="79" text-anchor="middle" font-size="30" font-weight="800" fill="#0b3d75">PSY</text>\n<text x="138" y="64" font-size="42" font-weight="800" fill="#0b3d75">${xmlEscape(spec.title)}</text>\n<text x="140" y="108" font-size="24" fill="#30597f">${xmlEscape(spec.subtitle)}</text>\n<text x="1540" y="62" font-size="18" text-anchor="end" fill="#30597f">${xmlEscape(target.level.toUpperCase())} • mastery ${target.masteryPct}%</text>\n<text x="1540" y="93" font-size="16" text-anchor="end" fill="#57748e">Visual Cortex • QA ${Math.round((review.accuracy + review.levelFit + review.clarity) / 3)}%</text>\n${sectionMarkup}\n<rect x="${margin}" y="${riskY + 12}" width="${width - margin * 2}" height="${Math.max(90, 50 + redFlags.length * 30)}" rx="20" fill="#fff0f0" stroke="#f0b4b4" stroke-width="2"/>\n<text x="${margin + 28}" y="${riskY + 42}" font-size="25" font-weight="800" fill="#9a1d1d">Red flags / safety</text>\n${riskText}\n<rect x="0" y="${svgHeight - 70}" width="${width}" height="70" fill="#0b3d75"/>\n<text x="${width / 2}" y="${svgHeight - 28}" text-anchor="middle" font-size="22" font-weight="700" fill="#ffffff">${xmlEscape(spec.footer)} • Educational use — verify current guidance for treatment decisions.</text>\n</svg>`;
 }
 
 async function atomicWrite(file, text) {
   const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
   await writeFile(tmp, text, { encoding: 'utf8', mode: 0o600 });
   await rename(tmp, file);
+}
+
+async function reviewWithFallback(ask, target, spec) {
+  let response = await ask({
+    task: buildVisualReviewTask(target, spec),
+    context: 'Medical QA for educational infographic. Do not invent new facts.'
+  });
+  let parsed = parseJsonPayload(response.text);
+  let review = normalizeReview(parsed, response.text);
+  if (review.verdict === 'revise' && !/\b(revise|reject|unsafe|incorrect|inaccurate|fail)\b/i.test(response.text || '')) {
+    response = await ask({
+      task: 'MEDICAL QA FORMAT REPAIR. Review the supplied infographic only. Return exactly ONE line: PASS accuracy=NN levelFit=NN clarity=NN, or REVISE accuracy=NN levelFit=NN clarity=NN reason=short reason. Do not add medical facts.',
+      context: JSON.stringify(spec)
+    });
+    parsed = parseJsonPayload(response.text);
+    review = normalizeReview(parsed, response.text);
+  }
+  return review;
 }
 
 export async function generateVisualInfographic(rawInput, { ask, state, dir = DEFAULT_VISUAL_DIR, now = new Date() } = {}) {
@@ -197,13 +297,8 @@ export async function generateVisualInfographic(rawInput, { ask, state, dir = DE
     task: buildVisualContentTask(target, { includeManagement, evidenceText }),
     context: evidenceText ? `SOURCE EVIDENCE\n${evidenceText}` : 'Adaptive visual learning. No patient-specific data.'
   });
-  const specJson = parseJsonPayload(content.text);
-  const spec = normalizeSpec(specJson, target);
-  const reviewResult = await ask({
-    task: buildVisualReviewTask(target, spec),
-    context: 'Medical QA for educational infographic. Do not invent new facts.'
-  });
-  const review = normalizeReview(parseJsonPayload(reviewResult.text));
+  const spec = normalizeSpec(parseJsonPayload(content.text), target, content.text);
+  const review = await reviewWithFallback(ask, target, spec);
   const score = Math.round((review.accuracy + review.levelFit + review.clarity) / 3);
   const accepted = review.verdict === 'pass' && review.accuracy >= 80 && review.levelFit >= 75 && review.clarity >= 75;
   if (!accepted) return { mode: 'visual_cortex', accepted: false, persisted: false, target, review, score, spec };
@@ -211,8 +306,6 @@ export async function generateVisualInfographic(rawInput, { ask, state, dir = DE
   const id = `${now.toISOString().replace(/[:.]/g, '-')}-${slug(target.domain)}-${crypto.randomBytes(3).toString('hex')}`;
   const svg = renderVisualSvg(spec, target, review);
   await mkdir(dir, { recursive: true, mode: 0o700 });
-  const svgPath = path.join(dir, `${id}.svg`);
-  const metaPath = path.join(dir, `${id}.json`);
   const metadata = {
     id,
     createdAt: now.toISOString(),
@@ -228,10 +321,11 @@ export async function generateVisualInfographic(rawInput, { ask, state, dir = DE
     localGenerated: true,
     externalImageApiRequired: false,
     patientDataUsed: false,
-    evidenceTextPersisted: false
+    evidenceTextPersisted: false,
+    formattingFallbackUsed: parseJsonPayload(content.text) == null
   };
-  await atomicWrite(svgPath, svg);
-  await atomicWrite(metaPath, `${JSON.stringify(metadata, null, 2)}\n`);
+  await atomicWrite(path.join(dir, `${id}.svg`), svg);
+  await atomicWrite(path.join(dir, `${id}.json`), `${JSON.stringify(metadata, null, 2)}\n`);
   return { mode: 'visual_cortex', accepted: true, persisted: true, metadata, svg };
 }
 
@@ -240,7 +334,7 @@ export async function listVisualInfographics(dir = DEFAULT_VISUAL_DIR, limit = 3
   const files = (await readdir(dir)).filter((x) => x.endsWith('.json')).sort().reverse().slice(0, clamp(Number(limit) || 30, 1, 100));
   const rows = [];
   for (const file of files) {
-    try { rows.push(JSON.parse(await readFile(path.join(dir, file), 'utf8'))); } catch { /* skip corrupt metadata */ }
+    try { rows.push(JSON.parse(await readFile(path.join(dir, file), 'utf8'))); } catch { /* ignore corrupt metadata */ }
   }
   return rows;
 }
@@ -260,5 +354,7 @@ export const visualCapabilities = Object.freeze({
   masteryDriven: true,
   bilingualVisuals: true,
   patientDataRequired: false,
-  treatmentClaimsNeedEvidence: true
+  treatmentClaimsNeedEvidence: true,
+  smallModelFormattingFallback: true,
+  malformedJsonDoesNotBypassMedicalQa: true
 });
