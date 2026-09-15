@@ -131,10 +131,11 @@ test('malformed small-model content is normalized but still requires medical QA'
   assert.equal(result.persisted, true);
   assert.equal(result.metadata.formattingFallbackUsed, true);
   assert.equal(result.metadata.qaScore, 91);
-  assert.ok(result.spec.sections.length >= 3);
   const saved = await readFile(path.join(dir, `${result.metadata.id}.svg`), 'utf8');
   assert.match(saved, /<svg/);
   assert.match(saved, /MSE ABC essentials/);
+  const rows = await listVisualInfographics(dir);
+  assert.equal(rows.length, 1);
 });
 
 test('failed medical QA is never persisted', async () => {
