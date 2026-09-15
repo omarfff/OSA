@@ -1,0 +1,147 @@
+[]
+        for item in data.get("items", []):
+            if "pull_request" in item:
+                continue
+            repo_url = str(item.get("repository_url", ""))
+            m = re.search(r"/repos/([^/]+/[^/]+)$", repo_url)
+            if not m:
+                continue
+            reward = extract_reward(item.get("body") or "")
+            out.append(Bounty(
+                repo=m.group(1), issue_number=int(item["number"]), title=item.get("title") or "",
+                body=item.get("body") or "", html_url=item.get("html_url") or "", reward_usd=reward,
+                source="github", comments=int(item.get("comments") or 0),
+                assignees=[a.get("login", "") for a in item.get("assignees", [])], metadata={"updated_at": item.get("updated_at")},
+            ))
+        return out
+
+    def fetch_issue(self, repo: str, number: int) -> dict[str, Any]:
+        return self.http.get_json(f"{GITHUB_API}/repos/{repo}/issues/{number}", headers=self.headers)
+
+    def fetch_comments(self, repo: str, number: int) -> list[dict[str, Any]]:
+        return self.http.get_json(f"{GITHUB_API}/repos/{repo}/issues/{number}/comments", params={"per_page": 100}, headers=self.headers)
+
+    def existing_attempts(self, repo: str, number: int) -> tuple[int, bool]:
+        comments = self.fetch_comments(repo, number)
+        marker = f"/attempt #{number}"
+        login = self.current_login()
+        count = 0
+        ours = False
+        for c in comments:
+            body = str(c.get("body") or "")
+            if marker.lower() in body.lower() or re.search(rf"/attempt\s+#?{number}\b", body, re.I):
+                count += 1
+                if login and str((c.get("user") or {}).get("login", "")).lower() == login.lower():
+                    ours = True
+        return count, ours
+
+    def post_attempt(self, bounty: Bounty, plan: list[str]) -> str:
+        if not self.s.github_token:
+            raise RuntimeError("GITHUB_TOKEN is required to post /attempt")
+        lines = [f"/attempt #{bounty.issue_number}", "", "Plan:"] + [f"- {x}" for x in plan[:5]]
+        body = "\n".join(lines)
+        data = self.http.post_json(
+            f"{GITHUB_API}/repos/{bounty.repo}/issues/{bounty.issue_number}/comments",
+            {"body": body}, headers=self.headers,
+        )
+        return str(data.get("html_url") or "")
+
+
+class AlgoraClient:
+    """Read public Algora bounty boards without requiring a private Algora API token.
+
+    Algora's public org bounty pages are server-rendered and link each bounty back
+    to the canonical GitHub issue. GitHub remains the source of truth before any
+    /attempt is posted.
+    """
+
+    ISSUE_HREF = re.compile(r"https://github\.com/([^/]+/[^/]+)/issues/(\d+)")
+
+    def __init__(self, settings: Settings, http: HttpClient):
+        self.s = settings
+        self.http = http
+
+    def discover(self) -> list[Bounty]:
+        merged: dict[str, Bounty] = {}
+        for org in self.s.algora_orgs:
+            try:
+                html = self.http.get_text(f"{self.s.algora_base}/{org}/bounties", params={"status": "open"}, timeout=20)
+                records = self._parse_html(html, org)
+            except Exception as exc:
+                logging.warning("Algora org %s fetch failed: %s", org, exc)
+                continue
+            for bounty in records:
+                old = merged.get(bounty.key)
+                if old is None or bounty.reward_usd > old.reward_usd:
+                    merged[bounty.key] = bounty
+        return list(merged.values())
+
+    def _parse_html(self, html: str, org: str) -> list[Bounty]:
+        soup = BeautifulSoup(html, "html.parser")
+        out: dict[str, Bounty] = {}
+        for anchor in soup.find_all("a", href=True):
+            href = str(anchor.get("href") or "")
+            m = self.ISSUE_HREF.search(href)
+            if not m:
+                continue
+            repo, number = m.group(1), int(m.group(2))
+            container = anchor
+            text = anchor.get_text(" ", strip=True)
+            # Walk up only a few levels; choose the smallest useful card-like
+            # ancestor containing a dollar amount to avoid parsing the whole page.
+            for _ in range(5):
+                parent = container.parent
+                if parent is None:
+                    break
+                candidate = parent.get_text(" ", strip=True)
+                if "$" in candidate and len(candidate) <= 2500:
+                    text = candidate
+                    container = parent
+                else:
+                    break
+            amount = extract_reward(text)
+            if amount <= 0:
+                continue
+            title = anchor.get_text(" ", strip=True) or f"{repo}#{number}"
+            bounty = Bounty(
+                repo=repo,
+                issue_number=number,
+                title=title,
+                body=text[:5000],
+                html_url=href,
+                reward_usd=amount,
+                source=f"algora:{org}",
+                metadata={"algora_org": org, "board_url": f"{self.s.algora_base}/{org}/bounties"},
+            )
+            old = out.get(bounty.key)
+            if old is None or bounty.reward_usd > old.reward_usd:
+                out[bounty.key] = bounty
+        return list(out.values())
+
+
+def first_text(d: dict[str, Any], *keys: str) -> str:
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
+def first_int(d: dict[str, Any], *keys: str) -> Optional[int]:
+    for k in keys:
+        try:
+            if d.get(k) is not None:
+                return int(d[k])
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def first_float(d: dict[str, Any], *keys: str) -> float:
+    for k in keys:
+        value = d.get(k)
+        if isinstance(value, dict):
+            for nested in ("usd", "amount", "value", "reward"):
+                if nested in value:
+                    value = value[nested]
+                    br
