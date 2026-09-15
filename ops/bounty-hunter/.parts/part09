@@ -1,0 +1,19 @@
+dd_argument("proposal_id")
+    args = parser.parse_args()
+
+    if args.cmd == "daemon":
+        hunter.daemon()
+    elif args.cmd == "once":
+        hunter.cycle()
+    elif args.cmd == "doctor":
+        print(json.dumps(hunter.doctor(), indent=2))
+    elif args.cmd == "financial-cycle":
+        print(json.dumps({"created": hunter.finance.cycle()}, indent=2))
+    elif args.cmd == "approve":
+        hunter.approve(args.proposal_id)
+        print(json.dumps({"approved": args.proposal_id}))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
