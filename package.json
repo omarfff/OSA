@@ -13,6 +13,12 @@
     "browser:chaos": "node scripts/browser-chaos.mjs",
     "browser:health": "node tools/osa-browser-runtime.mjs health",
     "revenue:gate": "node tools/revenue-gate.mjs",
+    "agents:list": "node tools/agent-fabric.mjs list",
+    "agents:status": "node tools/agent-fabric.mjs status",
+    "agents:plan": "node tools/agent-fabric.mjs plan",
+    "agents:run": "node tools/agent-fabric.mjs run",
+    "ai:status": "node tools/ai-router.mjs status",
+    "ai:ask": "node tools/ai-router.mjs ask",
     "car:hunt": "node tools/car-hunter.mjs",
     "car:autopilot": "node tools/car-hunter-autopilot.mjs"
   },
