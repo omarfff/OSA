@@ -1,0 +1,127 @@
+     old = merged.get(b.key)
+            if old:
+                old.reward_usd = max(old.reward_usd, b.reward_usd)
+                old.metadata["algora"] = b.metadata.get("algora")
+                old.source = f"{old.source}+{b.source}"
+            else:
+                merged[b.key] = b
+        return sorted(merged.values(), key=lambda b: (b.reward_usd, -b.comments), reverse=True)
+
+    def process_bounty(self, b: Bounty) -> None:
+        self.store.upsert_bounty(b)
+        if b.reward_usd < self.s.min_bounty_usd:
+            return
+        if self.store.has_attempt(b.key) or self.store.active_attempt_count(self.s.attempt_ttl_hours) >= self.s.max_active_attempts:
+            return
+        issue = self.github.fetch_issue(b.repo, b.issue_number)
+        if str(issue.get("state")) != "open" or issue.get("locked") or issue.get("assignees"):
+            return
+        attempts, ours = self.github.existing_attempts(b.repo, b.issue_number)
+        if ours or attempts >= self.s.max_existing_attempts:
+            return
+        b.body = issue.get("body") or b.body
+        b.title = issue.get("title") or b.title
+        b.reward_usd = max(b.reward_usd, extract_reward(b.body))
+        guard_reason = bounty_guard_reason(b)
+        if guard_reason:
+            self.store.upsert_bounty(b, status="rejected_guard")
+            logging.warning("Rejected %s: %s", b.key, guard_reason)
+            return
+        if not algora_workflow_verified(b):
+            self.store.upsert_bounty(b, status="not_algora_verified")
+            return
+        analysis = self.ai.analyze(b, attempts)
+        score = int(analysis.get("score", 0))
+        self.store.upsert_bounty(b, score=score, status="analyzed")
+        if not analysis.get("should_attempt") or score < self.s.ai_min_score:
+            return
+        if not self.s.auto_attempt:
+            self.notifier.send(f"🎯 Candidate {b.key} ${b.reward_usd:.0f}, score {score}; AUTO_ATTEMPT=false")
+            return
+        comment_url = self.github.post_attempt(b, analysis.get("plan") or ["Review and implement the smallest tested fix"])
+        self.store.record_attempt(b.key, comment_url)
+        self.store.upsert_bounty(b, score=score, status="attempted")
+        self.notifier.send(f"🎯 Attempted {b.key} (${b.reward_usd:.0f}, score {score})\n{comment_url}")
+        if self.s.auto_prepare_fix and self.s.openai_api_key:
+            try:
+                evidence = self.fixer.prepare(b, analysis.get("keywords", []))
+                passed = bool(evidence["tests"]) and all(x.get("ok") for x in evidence["tests"])
+                self.notifier.send(f"🛠️ Fix prepared for {b.key}. Tests={'PASS' if passed else 'NEEDS_REVIEW'}\nWorkspace: {evidence['workspace']}")
+            except Exception as exc:
+                logging.exception("fix preparation failed for %s", b.key)
+                self.notifier.send(f"⚠️ Fix preparation failed for {b.key}: {type(exc).__name__}: {exc}")
+
+    def cycle(self) -> None:
+        for bounty in self.discover():
+            try:
+                self.process_bounty(bounty)
+            except requests.HTTPError as exc:
+                status = getattr(exc.response, "status_code", None)
+                logging.warning("bounty %s HTTP failure %s: %s", bounty.key, status, exc)
+                if status in {403, 429}:
+                    break
+            except Exception:
+                logging.exception("bounty processing failed: %s", bounty.key)
+        try:
+            self.finance.cycle()
+        except Exception:
+            logging.exception("financial cycle failed")
+
+    def daemon(self) -> None:
+        self.notifier.send("🟢 OSA bounty hunter started")
+        while True:
+            started = time.monotonic()
+            self.cycle()
+            elapsed = time.monotonic() - started
+            time.sleep(max(5, self.s.poll_interval - elapsed))
+
+    def doctor(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "time": utcnow(),
+            "github_token": bool(self.s.github_token),
+            "openai": bool(self.s.openai_api_key),
+            "telegram": bool(self.s.telegram_bot_token and self.s.telegram_chat_id),
+            "algora_orgs": self.s.algora_orgs,
+            "bubblewrap": Path(self.s.bwrap_binary).exists(),
+            "financial_configured": self.finance.enabled,
+            "financial_private_key": bool(self.s.private_key),
+            "financial_broadcast_requires_approval_marker": True,
+        }
+        if self.finance.enabled:
+            data["balances"] = self.finance.balances()
+        return data
+
+    def approve(self, pid: str) -> None:
+        row = self.store.get_proposal(pid)
+        if not row:
+            raise RuntimeError("proposal not found")
+        if row["status"] != "pending":
+            raise RuntimeError(f"proposal status is {row['status']}, not pending")
+        if int(row["expires_at"]) < int(time.time()):
+            self.store.set_proposal_status(pid, "expired")
+            raise RuntimeError("proposal expired")
+        marker = self.s.approval_dir / f"{pid}.approved"
+        marker.write_text(f"approved_at={utcnow()}\n", encoding="utf-8")
+        os.chmod(marker, 0o600)
+        logging.warning("financial proposal %s approved; next financial cycle may broadcast it", pid)
+
+
+def configure_logging() -> None:
+    level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+    logging.basicConfig(level=level, format="%(asctime)sZ %(levelname)s %(name)s: %(message)s", datefmt="%Y-%m-%dT%H:%M:%S")
+    logging.Formatter.converter = time.gmtime
+
+
+def main() -> int:
+    load_dotenv(override=False)
+    configure_logging()
+    settings = Settings()
+    hunter = BountyHunter(settings)
+    parser = argparse.ArgumentParser(prog=APP_NAME)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("daemon")
+    sub.add_parser("once")
+    sub.add_parser("doctor")
+    sub.add_parser("financial-cycle")
+    ap = sub.add_parser("approve")
+    ap.a
