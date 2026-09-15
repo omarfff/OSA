@@ -1,0 +1,41 @@
+[Unit]
+Description=OSA Autonomous Bounty Hunter
+Documentation=https://github.com/omarfff/OSA/tree/main/ops/bounty-hunter
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=osa-bounty
+Group=osa-bounty
+WorkingDirectory=/opt/osa-bounty-hunter
+EnvironmentFile=/etc/osa-bounty-hunter.env
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/opt/osa-bounty-hunter/.venv/bin/python /opt/osa-bounty-hunter/bounty_hunter.py doctor
+ExecStart=/opt/osa-bounty-hunter/.venv/bin/python /opt/osa-bounty-hunter/bounty_hunter.py daemon
+Restart=on-failure
+RestartSec=15s
+TimeoutStartSec=90s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/osa-bounty-hunter
+
+[Install]
+WantedBy=multi-user.target
