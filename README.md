@@ -59,9 +59,12 @@ OSA is one product. Agent Trust Oracle, Procurement Guard, pricing/benchmark int
 
 Progress means verified external usage, verified payment and repeat usage — not internal test rows, crawler probes, generated dashboards or speculative revenue.
 
-
 ## Revenue-first gate
 
 Before first verified external payment, OSA keeps one primary revenue path plus one backup and freezes generalized product/infrastructure/payment/browser/autonomy expansion unless it is the minimum fix for a named external blocker or a real safety incident.
 
 Every non-trivial change should carry the decision record defined in `knowledge/05-revenue-gate.md`. Pull requests are checked by the Revenue Gate workflow. The governing distinction is strict: BUILT != VERIFIED != SELLING != PAID.
+
+## Ecosystem
+
+[![Powered by RustChain](https://img.shields.io/badge/Powered%20by-RustChain-orange)](https://rustchain.org)
