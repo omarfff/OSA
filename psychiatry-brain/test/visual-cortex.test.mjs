@@ -15,9 +15,7 @@ import {
 } from '../src/visual-cortex.mjs';
 
 function passingAsk() {
-  let calls = 0;
   return async ({ task }) => {
-    calls += 1;
     if (task.includes('BUILD INFOGRAPHIC CONTENT')) {
       return { text: JSON.stringify({
         title: 'Mood vs Affect | المزاج والانفعال',
@@ -52,6 +50,18 @@ function rejectingAsk() {
       }) };
     }
     return { text: JSON.stringify({ verdict: 'revise', accuracy: 40, levelFit: 90, clarity: 90, issues: ['Unsupported treatment claim'], reason: 'Needs correction' }) };
+  };
+}
+
+function malformedSmallModelAsk() {
+  return async ({ task }) => {
+    if (task.includes('BUILD INFOGRAPHIC CONTENT')) {
+      return { text: `MSE ABC Essentials\n- Appearance and behaviour: describe what you observe\n- Speech: rate, volume, quantity and spontaneity\n- Mood is what the patient reports\n- Affect is what you observe\n- Thought: separate form from content\n- Perception: ask about unusual experiences\n- Cognition: consider attention and orientation\n- Insight: explore understanding of illness and treatment\nMemory hook: observe first, infer second` };
+    }
+    if (task.includes('MEDICAL QA')) {
+      return { text: 'PASS accuracy=91 levelFit=92 clarity=90' };
+    }
+    return { text: 'PASS accuracy=88 levelFit=88 clarity=88' };
   };
 }
 
@@ -111,6 +121,22 @@ test('accepted visual is written privately with metadata after QA', async () => 
   assert.equal(rows[0].qaScore, 94);
 });
 
+test('malformed small-model content is normalized but still requires medical QA', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'visual-cortex-malformed-'));
+  const state = emptyLearnerState(new Date('2026-09-16T00:00:00Z'));
+  const result = await generateVisualInfographic({ topic: 'MSE ABC essentials', domain: 'mse', level: 'foundation' }, {
+    ask: malformedSmallModelAsk(), state, dir, now: new Date('2026-09-16T01:00:00Z')
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(result.persisted, true);
+  assert.equal(result.metadata.formattingFallbackUsed, true);
+  assert.equal(result.metadata.qaScore, 91);
+  assert.ok(result.spec.sections.length >= 3);
+  const saved = await readFile(path.join(dir, `${result.metadata.id}.svg`), 'utf8');
+  assert.match(saved, /<svg/);
+  assert.match(saved, /MSE ABC essentials/);
+});
+
 test('failed medical QA is never persisted', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'visual-cortex-reject-'));
   const state = emptyLearnerState();
@@ -125,4 +151,6 @@ test('capabilities declare local drawing without an image API', () => {
   assert.equal(visualCapabilities.localSvgRendering, true);
   assert.equal(visualCapabilities.externalImageApiRequired, false);
   assert.equal(visualCapabilities.medicalQaBeforePersistence, true);
+  assert.equal(visualCapabilities.smallModelFormattingFallback, true);
+  assert.equal(visualCapabilities.malformedJsonDoesNotBypassMedicalQa, true);
 });
