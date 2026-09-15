@@ -1,0 +1,119 @@
+any(tuple(argv[: len(prefix)]) == prefix for prefix in self.ALLOWED_PREFIXES)
+        if not ok:
+            raise ValueError(f"test command not allow-listed: {command}")
+        return argv
+
+    def run(self, workspace: Path, commands: Iterable[str]) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        if not self.s.sandbox_enabled:
+            return [{"ok": False, "skipped": True, "reason": "SANDBOX_ENABLED=false"}]
+        if not Path(self.s.bwrap_binary).exists():
+            return [{"ok": False, "skipped": True, "reason": "bubblewrap missing; fail-closed"}]
+        for command in commands:
+            argv = self._validate(command)
+            bwrap = [
+                self.s.bwrap_binary, "--die-with-parent", "--new-session", "--unshare-net",
+                "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin",
+                "--ro-bind", "/lib", "/lib", "--ro-bind-try", "/lib64", "/lib64",
+                "--ro-bind", "/etc", "/etc", "--dev", "/dev", "--proc", "/proc",
+                "--tmpfs", "/tmp", "--bind", str(workspace), "/workspace", "--chdir", "/workspace",
+                "--setenv", "HOME", "/tmp", "--", *argv,
+            ]
+            try:
+                cp = subprocess.run(bwrap, text=True, capture_output=True, timeout=self.s.sandbox_timeout)
+                results.append({"command": command, "ok": cp.returncode == 0, "returncode": cp.returncode, "stdout": cp.stdout[-8000:], "stderr": cp.stderr[-8000:]})
+            except subprocess.TimeoutExpired:
+                results.append({"command": command, "ok": False, "timeout": True})
+        return results
+
+
+class FixPreparer:
+    def __init__(self, settings: Settings, ai: AIAnalyzer, sandbox: SandboxRunner):
+        self.s = settings
+        self.ai = ai
+        self.sandbox = sandbox
+
+    def prepare(self, bounty: Bounty, keywords: list[str]) -> dict[str, Any]:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", bounty.repo):
+            raise ValueError("invalid GitHub repository identifier")
+        workspace = self.s.work_root / re.sub(r"[^A-Za-z0-9_.-]+", "_", bounty.key)
+        if workspace.exists():
+            shutil.rmtree(workspace)
+        workspace.parent.mkdir(parents=True, exist_ok=True)
+        self._run(["git", "clone", "--depth", "1", "--filter=blob:none", f"https://github.com/{bounty.repo}.git", str(workspace)], timeout=180)
+        context = self._build_context(workspace, bounty, keywords)
+        patch_result = self.ai.generate_patch(bounty, context)
+        patch = patch_result["patch"]
+        if not patch.strip() or len(patch) > 500_000:
+            raise RuntimeError("AI returned empty or oversized patch")
+        patch_file = workspace / "candidate.patch"
+        patch_file.write_text(patch, encoding="utf-8")
+        self._run(["git", "apply", "--check", str(patch_file)], cwd=workspace, timeout=30)
+        self._run(["git", "apply", str(patch_file)], cwd=workspace, timeout=30)
+        diff = self._run(["git", "diff", "--check"], cwd=workspace, timeout=30).stdout
+        tests = self.sandbox.run(workspace, patch_result.get("test_commands", []))
+        evidence = {
+            "bounty": bounty.key,
+            "workspace": str(workspace),
+            "summary": patch_result.get("summary", ""),
+            "tests": tests,
+            "diff_check": diff,
+            "prepared_at": utcnow(),
+        }
+        (workspace / "osa-evidence.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+        return evidence
+
+    def _build_context(self, workspace: Path, bounty: Bounty, keywords: list[str]) -> str:
+        files_cp = self._run(["git", "ls-files"], cwd=workspace, timeout=30)
+        files = [x for x in files_cp.stdout.splitlines() if x and not self._skip_file(x)]
+        tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_-]{3,}", bounty.title + " " + bounty.body))
+        tokens.update(keywords)
+        tokens = {t.lower() for t in tokens if len(t) >= 4}
+        scored: list[tuple[int, str]] = []
+        for f in files[:5000]:
+            lower = f.lower()
+            score = sum(3 for t in tokens if t in lower)
+            if Path(f).name.lower() in {"readme.md", "package.json", "pyproject.toml", "cargo.toml", "go.mod"}:
+                score += 2
+            scored.append((score, f))
+        scored.sort(reverse=True)
+        selected = [f for score, f in scored if score > 0][:12]
+        if not selected:
+            selected = [f for _, f in scored[:8]]
+        out: list[str] = []
+        used = 0
+        for rel in selected:
+            path = (workspace / rel).resolve()
+            if not str(path).startswith(str(workspace.resolve())) or not path.is_file():
+                continue
+            try:
+                data = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            chunk = f"\n===== {rel} =====\n{data[:25000]}\n"
+            if used + len(chunk.encode()) > self.s.max_repo_context_bytes:
+                break
+            out.append(chunk)
+            used += len(chunk.encode())
+        return "".join(out)
+
+    @staticmethod
+    def _skip_file(path: str) -> bool:
+        p = path.lower()
+        return any(p.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".lock")) or "/vendor/" in f"/{p}/"
+
+    @staticmethod
+    def _run(argv: list[str], cwd: Optional[Path] = None, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+        cp = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=timeout)
+        if cp.returncode != 0:
+            raise RuntimeError(f"command failed ({cp.returncode}): {argv[0]}: {cp.stderr[-3000:]}")
+        return cp
+
+
+class FinancialEngine:
+    def __init__(self, settings: Settings, http: HttpClient, store: StateStore, notifier: Notifier):
+        self.s = settings
+        self.http = http
+        self.store = store
+        self.notifier = notifier
+        self.enabled = all([settings.wallet_address, 
