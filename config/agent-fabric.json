@@ -74,6 +74,28 @@
       "enabled": true
     },
     {
+      "id": "ai-router-status",
+      "name": "AI Router Status",
+      "domain": "control",
+      "purpose": "Report local and fallback AI provider readiness without exposing API key values.",
+      "command": ["bash", "ops/ai-router-with-brain-env.sh", "status"],
+      "args": "none",
+      "access": "read_only",
+      "revenue_impact": "blocker",
+      "enabled": true
+    },
+    {
+      "id": "ai-helper",
+      "name": "AI Helper",
+      "domain": "control",
+      "purpose": "Use the local OSA model first and fall back to the configured Gemini provider only if needed.",
+      "command": ["bash", "ops/ai-router-with-brain-env.sh", "ask"],
+      "args": "passthrough",
+      "access": "draft",
+      "revenue_impact": "support",
+      "enabled": true
+    },
+    {
       "id": "media-worker",
       "name": "Media Worker",
       "domain": "marketing",
