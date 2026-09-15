@@ -15,7 +15,7 @@ ENV_FILE=/etc/osa-bounty-hunter.env
 SERVICE_SRC="$ROOT/ops/systemd/osa-bounty-hunter.service"
 SERVICE_DST=/etc/systemd/system/osa-bounty-hunter.service
 
-for f in "$SRC/bounty_hunter.py" "$SRC/requirements.txt" "$SRC/.env.example" "$SRC/test_bounty_hunter.py" "$SERVICE_SRC"; do
+for f in "$SRC/bounty_hunter.py" "$SRC/requirements.txt" "$SRC/test_bounty_hunter.py" "$SERVICE_SRC"; do
   [[ -f "$f" ]] || { echo "Missing required file: $f" >&2; exit 2; }
 done
 
@@ -33,9 +33,10 @@ install -o root -g root -m 0755 "$SRC/bounty_hunter.py" "$APP/bounty_hunter.py"
 install -o root -g root -m 0644 "$SRC/requirements.txt" "$APP/requirements.txt"
 install -o root -g root -m 0644 "$SRC/test_bounty_hunter.py" "$APP/test_bounty_hunter.py"
 
+# Production secrets never enter Git. Keep the EnvironmentFile root-only on the VPS.
 if [[ ! -f "$ENV_FILE" ]]; then
-  install -o root -g root -m 0600 "$SRC/.env.example" "$ENV_FILE"
-  echo "Created $ENV_FILE with safe defaults and blank secrets." >&2
+  install -o root -g root -m 0600 /dev/null "$ENV_FILE"
+  echo "Created empty root-only $ENV_FILE. Add production credentials locally." >&2
 else
   chmod 0600 "$ENV_FILE"
   chown root:root "$ENV_FILE"
