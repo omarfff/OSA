@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "policy": {
+    "default_timeout_ms": 120000,
+    "max_output_bytes": 1048576,
+    "write_gate_env": "OSA_AGENT_ALLOW_WRITE",
+    "financial_execution": "blocked"
+  },
+  "agents": [
+    {
+      "id": "revenue-scout",
+      "name": "Revenue Scout",
+      "domain": "commercial",
+      "purpose": "Collect high-evidence market demand signals and rank actionable sectors.",
+      "command": ["node", "tools/market-radar.mjs"],
+      "args": "none",
+      "access": "read_only",
+      "revenue_impact": "direct",
+      "enabled": true
+    },
+    {
+      "id": "lead-auditor",
+      "name": "Lead Leakage Auditor",
+      "domain": "commercial",
+      "purpose": "Run a public-page, read-only conversion-path audit for a named prospect.",
+      "command": ["node", "tools/lead-leakage-audit.mjs"],
+      "args": "one_public_url",
+      "access": "read_only",
+      "revenue_impact": "direct",
+      "enabled": true
+    },
+    {
+      "id": "mcp-verifier",
+      "name": "MCP Verifier",
+      "domain": "commercial",
+      "purpose": "Verify a public MCP endpoint before sale, procurement, or routing decisions.",
+      "command": ["node", "tools/mcp-preflight.mjs"],
+      "args": "one_public_url",
+      "access": "read_only",
+      "revenue_impact": "direct",
+      "enabled": true
+    },
+    {
+      "id": "browser-health",
+      "name": "Browser Health Bot",
+      "domain": "control",
+      "purpose": "Check the existing OSA browser runtime without performing external account actions.",
+      "command": ["node", "tools/osa-browser-runtime.mjs", "health"],
+      "args": "none",
+      "access": "read_only",
+      "revenue_impact": "blocker",
+      "enabled": true
+    },
+    {
+      "id": "watchdog",
+      "name": "Autopilot Watchdog",
+      "domain": "control",
+      "purpose": "Detect failed or unhealthy OSA runtime services and surface the smallest blocker.",
+      "command": ["node", "tools/autopilot-watchdog.mjs"],
+      "args": "none",
+      "access": "read_only",
+      "revenue_impact": "blocker",
+      "enabled": true
+    },
+    {
+      "id": "payment-watch",
+      "name": "Payment Watch Bot",
+      "domain": "payments",
+      "purpose": "Observe configured public wallet/payment receipt signals; never transfer or sign funds.",
+      "command": ["node", "tools/telegram-wallet-tracker.mjs"],
+      "args": "none",
+      "access": "read_only",
+      "revenue_impact": "direct",
+      "enabled": true
+    },
+    {
+      "id": "media-worker",
+      "name": "Media Worker",
+      "domain": "marketing",
+      "purpose": "Generate factual local marketing artifacts; publishing remains outside this bot.",
+      "command": ["node", "tools/media-worker.mjs"],
+      "args": "none",
+      "access": "draft",
+      "revenue_impact": "support",
+      "enabled": false
+    },
+    {
+      "id": "brain-learner",
+      "name": "Brain Learner",
+      "domain": "control",
+      "purpose": "Import verified owner feedback and outcomes into OSA local experience memory.",
+      "command": ["node", "tools/osa-brain-learn.mjs"],
+      "args": "passthrough",
+      "access": "write",
+      "revenue_impact": "support",
+      "enabled": false
+    },
+    {
+      "id": "car-hunter",
+      "name": "Car Hunter",
+      "domain": "vehicles",
+      "purpose": "Search and score vehicle opportunities in the isolated car-hunter domain.",
+      "command": ["node", "tools/car-hunter.mjs"],
+      "args": "passthrough",
+      "access": "read_only",
+      "revenue_impact": "none",
+      "enabled": false
+    },
+    {
+      "id": "superteam-builder",
+      "name": "Superteam Artifact Builder",
+      "domain": "bounties",
+      "purpose": "Prepare a submission artifact locally for a verified bounty.",
+      "command": ["python3", "ops/superteam_artifact_builder.py"],
+      "args": "passthrough",
+      "access": "draft",
+      "revenue_impact": "direct",
+      "enabled": false
+    },
+    {
+      "id": "superteam-submitter",
+      "name": "Superteam Submitter",
+      "domain": "bounties",
+      "purpose": "Submit a previously prepared bounty artifact only when explicitly enabled.",
+      "command": ["python3", "ops/superteam_submitter.py"],
+      "args": "passthrough",
+      "access": "write",
+      "revenue_impact": "direct",
+      "enabled": false
+    }
+  ]
+}
