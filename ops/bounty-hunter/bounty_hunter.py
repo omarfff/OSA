@@ -149,6 +149,7 @@ class Settings:
 
     github_token: str = field(default_factory=lambda: os.getenv("GITHUB_TOKEN", "").strip())
     github_cli_bridge: bool = field(default_factory=lambda: env_bool("GH_CLI_BRIDGE_ENABLED", False))
+    github_discovery_enabled: bool = field(default_factory=lambda: env_bool("GITHUB_DISCOVERY_ENABLED", False))
     gh_binary: str = field(default_factory=lambda: os.getenv("GH_BINARY", "/usr/bin/gh"))
     github_api_version: str = field(default_factory=lambda: os.getenv("GITHUB_API_VERSION", "2026-03-10"))
     github_search_query: str = field(default_factory=lambda: os.getenv("GITHUB_SEARCH_QUERY", 'is:issue is:open label:"💎 Bounty"'))
@@ -1047,14 +1048,14 @@ class BountyHunter:
 
     def discover(self) -> list[Bounty]:
         merged: dict[str, Bounty] = {}
-        if self.s.github_token:
+        if self.s.github_discovery_enabled and (self.s.github_token or self.s.github_cli_bridge):
             try:
                 for b in self.github.search_bounties():
                     merged[b.key] = b
             except Exception:
                 logging.exception("GitHub discovery failed")
         else:
-            logging.info("generic GitHub discovery skipped without token; using verified Algora boards only")
+            logging.info("generic GitHub discovery disabled; using verified Algora boards only")
         for b in self.algora.discover():
             old = merged.get(b.key)
             if old:
@@ -1148,6 +1149,7 @@ class BountyHunter:
             "ai_router": bool(self.ai.router),
             "ai_router_provider": self.s.ai_router_provider if self.ai.router else None,
             "github_cli_bridge": self.s.github_cli_bridge,
+            "github_discovery_enabled": self.s.github_discovery_enabled,
             "telegram": bool(self.s.telegram_bot_token and self.s.telegram_chat_id),
             "algora_orgs": self.s.algora_orgs,
             "bubblewrap": Path(self.s.bwrap_binary).exists(),
