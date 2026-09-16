@@ -10,8 +10,9 @@ Autonomous scope:
   refill (USDT -> WPOL using Uniswap V3) and cold-wallet USDT sweeps.
 
 Financial safety invariant:
-No value-moving transaction is signed or broadcast unless a fresh proposal
-has an explicit local approval marker created with `bounty_hunter.py approve`.
+No value-moving transaction is signed or broadcast by this daemon. Financial
+proposals are simulation-only; execution requires the centralized Supabase
+approval/executor path outside this process.
 """
 from __future__ import annotations
 
@@ -187,7 +188,8 @@ class Settings:
     sweep_threshold_usdt: float = field(default_factory=lambda: env_float("SWEEP_THRESHOLD_USDT", 50))
     usdt_operational_reserve: float = field(default_factory=lambda: env_float("USDT_OPERATIONAL_RESERVE", 15))
     proposal_ttl: int = field(default_factory=lambda: env_int("FINANCIAL_PROPOSAL_TTL_SECONDS", 900))
-    financial_broadcast_enabled: bool = field(default_factory=lambda: env_bool("FINANCIAL_BROADCAST_ENABLED", True))
+    financial_monitor_enabled: bool = field(default_factory=lambda: env_bool("FINANCIAL_MONITOR_ENABLED", False))
+    financial_broadcast_enabled: bool = field(default_factory=lambda: env_bool("FINANCIAL_BROADCAST_ENABLED", False))
 
     def ensure_dirs(self) -> None:
         self.state_db.parent.mkdir(parents=True, exist_ok=True)
@@ -780,7 +782,7 @@ class FinancialEngine:
         self.http = http
         self.store = store
         self.notifier = notifier
-        self.enabled = all([settings.wallet_address, settings.usdt_address, settings.wpol_address, settings.router_address, settings.quoter_address])
+        self.enabled = settings.financial_monitor_enabled and all([settings.wallet_address, settings.usdt_address, settings.wpol_address, settings.router_address, settings.quoter_address])
         self.w3: Optional[Web3] = None
         if self.enabled:
             self.w3 = Web3(Web3.HTTPProvider(settings.polygon_rpc, request_kwargs={"timeout": 20}))
@@ -868,8 +870,9 @@ class FinancialEngine:
         }
 
     def process_approved(self) -> None:
-        if not self.s.financial_broadcast_enabled:
-            return
+        if self.s.financial_broadcast_enabled:
+            raise RuntimeError("financial broadcast is disabled in bounty_hunter; use the centralized Supabase approval executor")
+        return
         for row in self.store.pending_proposals():
             pid = row["id"]
             if int(row["expires_at"]) < int(time.time()):
@@ -1069,6 +1072,7 @@ class BountyHunter:
             "telegram": bool(self.s.telegram_bot_token and self.s.telegram_chat_id),
             "algora_orgs": self.s.algora_orgs,
             "bubblewrap": Path(self.s.bwrap_binary).exists(),
+            "financial_monitor_enabled": self.s.financial_monitor_enabled,
             "financial_configured": self.finance.enabled,
             "financial_private_key": bool(self.s.private_key),
             "financial_broadcast_requires_approval_marker": True,
@@ -1086,10 +1090,7 @@ class BountyHunter:
         if int(row["expires_at"]) < int(time.time()):
             self.store.set_proposal_status(pid, "expired")
             raise RuntimeError("proposal expired")
-        marker = self.s.approval_dir / f"{pid}.approved"
-        marker.write_text(f"approved_at={utcnow()}\n", encoding="utf-8")
-        os.chmod(marker, 0o600)
-        logging.warning("financial proposal %s approved; next financial cycle may broadcast it", pid)
+        raise RuntimeError("local approval markers are disabled; use the centralized Supabase approval flow")
 
 
 def configure_logging() -> None:
