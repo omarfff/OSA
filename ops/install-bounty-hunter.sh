@@ -54,6 +54,12 @@ fi
 "$APP/.venv/bin/python" -m pip install --disable-pip-version-check --requirement "$APP/requirements.txt"
 "$APP/.venv/bin/python" -m pip check
 
+# umask 077 intentionally protects installer-created files, but the daemon runs
+# as osa-bounty. Keep root ownership while granting that group read/execute only.
+chgrp -R osa-bounty "$APP/.venv"
+chmod -R g+rX,o-rwx "$APP/.venv"
+runuser -u osa-bounty -- "$APP/.venv/bin/python" -c 'import orjson'
+
 cd "$APP"
 "$APP/.venv/bin/python" -m py_compile "$APP/bounty_hunter.py"
 "$APP/.venv/bin/python" -m pytest -q "$APP/test_bounty_hunter.py"
