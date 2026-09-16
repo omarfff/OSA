@@ -315,7 +315,10 @@ class HttpClient:
         return response.json()
 
     def get_text(self, url: str, *, params: Optional[dict[str, Any]] = None, headers: Optional[dict[str, str]] = None, timeout: int = 20) -> str:
-        response = self.session.get(url, params=params, headers=headers, timeout=timeout)
+        request_headers = {"Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"}
+        if headers:
+            request_headers.update(headers)
+        response = self.session.get(url, params=params, headers=request_headers, timeout=timeout)
         response.raise_for_status()
         return response.text
 
@@ -981,16 +984,19 @@ class BountyHunter:
 
     def discover(self) -> list[Bounty]:
         merged: dict[str, Bounty] = {}
-        try:
-            for b in self.github.search_bounties():
-                merged[b.key] = b
-        except Exception:
-            logging.exception("GitHub discovery failed")
+        if self.s.github_token:
+            try:
+                for b in self.github.search_bounties():
+                    merged[b.key] = b
+            except Exception:
+                logging.exception("GitHub discovery failed")
+        else:
+            logging.info("generic GitHub discovery skipped without token; using verified Algora boards only")
         for b in self.algora.discover():
             old = merged.get(b.key)
             if old:
                 old.reward_usd = max(old.reward_usd, b.reward_usd)
-                old.metadata["algora"] = b.metadata.get("algora")
+                old.metadata.update(b.metadata)
                 old.source = f"{old.source}+{b.source}"
             else:
                 merged[b.key] = b
@@ -1075,7 +1081,7 @@ class BountyHunter:
             "financial_monitor_enabled": self.s.financial_monitor_enabled,
             "financial_configured": self.finance.enabled,
             "financial_private_key": bool(self.s.private_key),
-            "financial_broadcast_requires_approval_marker": True,
+            "financial_broadcast_mode": "central_supabase_executor_only",
         }
         if self.finance.enabled:
             data["balances"] = self.finance.balances()
