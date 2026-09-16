@@ -632,7 +632,14 @@ class AIAnalyzer:
     def __init__(self, settings: Settings):
         self.s = settings
         self.client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
-        self.router = Path(settings.ai_router_path) if settings.ai_router_path and Path(settings.ai_router_path).is_file() else None
+        self.router = None
+        if settings.ai_router_path:
+            try:
+                candidate = Path(settings.ai_router_path)
+                if candidate.is_file() and os.access(candidate, os.R_OK):
+                    self.router = candidate
+            except OSError:
+                self.router = None
 
     def _router_text(self, prompt: str, max_tokens: int) -> str:
         if not self.router:
