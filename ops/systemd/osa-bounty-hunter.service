@@ -13,6 +13,10 @@ Group=osa-bounty
 WorkingDirectory=/opt/osa-bounty-hunter
 EnvironmentFile=/etc/osa-bounty-hunter.env
 Environment=PYTHONUNBUFFERED=1
+# Financial movement is fail-closed at the service boundary. Proposals and
+# simulations may run, but this daemon cannot broadcast value-moving txs.
+Environment=FINANCIAL_BROADCAST_ENABLED=false
+Environment=OPENAI_MODEL=gpt-5.6-sol
 ExecStartPre=/opt/osa-bounty-hunter/.venv/bin/python /opt/osa-bounty-hunter/bounty_hunter.py doctor
 ExecStart=/opt/osa-bounty-hunter/.venv/bin/python /opt/osa-bounty-hunter/bounty_hunter.py daemon
 Restart=on-failure
@@ -30,12 +34,19 @@ ProtectKernelModules=true
 ProtectKernelLogs=true
 ProtectControlGroups=true
 ProtectClock=true
+ProtectHostname=true
 RestrictSUIDSGID=true
 LockPersonality=true
+RemoveIPC=true
+ProtectProc=invisible
+ProcSubset=pid
 CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadWritePaths=/var/lib/osa-bounty-hunter
+TasksMax=256
+MemoryMax=2G
+LimitNOFILE=8192
 
 [Install]
 WantedBy=multi-user.target
