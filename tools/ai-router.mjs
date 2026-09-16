@@ -5,11 +5,6 @@ function clean(value, max = 4000) {
   return String(value ?? '').replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, max);
 }
 
-function outputLimit(env, fallback = 400) {
-  const n = Number(env.OSA_AI_MAX_OUTPUT_TOKENS || fallback);
-  return Math.max(64, Math.min(Number.isFinite(n) ? Math.trunc(n) : fallback, 8192));
-}
-
 function parseOrder(raw) {
   const allowed = new Set(['ollama', 'openai_compatible', 'gemini']);
   const order = String(raw || 'ollama,openai_compatible,gemini').split(',').map((x) => x.trim()).filter((x) => allowed.has(x));
@@ -61,7 +56,7 @@ async function callOllama({ messages, fetchImpl, env, signal }) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     signal,
-    body: JSON.stringify({ model, stream: false, think: false, messages, options: { temperature: 0.15, num_predict: outputLimit(env, 320) } }),
+    body: JSON.stringify({ model, stream: false, think: false, messages, options: { temperature: 0.15, num_predict: 320 } }),
   });
   if (!response.ok) throw new Error(`ollama_http_${response.status}`);
   const payload = await response.json();
@@ -82,7 +77,7 @@ async function callOpenAICompatible({ messages, fetchImpl, env, signal }) {
       authorization: `Bearer ${env.OSA_AI_REMOTE_API_KEY}`,
     },
     signal,
-    body: JSON.stringify({ model, messages, temperature: 0.15, max_tokens: outputLimit(env, 400) }),
+    body: JSON.stringify({ model, messages, temperature: 0.15, max_tokens: 400 }),
   });
   if (!response.ok) throw new Error(`openai_compatible_http_${response.status}`);
   const payload = await response.json();
@@ -101,7 +96,7 @@ async function callGemini({ messages, fetchImpl, env, signal }) {
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: clean(m.content, 12000) }],
   }));
-  const body = { contents, generationConfig: { temperature: 0.15, maxOutputTokens: outputLimit(env, 400) } };
+  const body = { contents, generationConfig: { temperature: 0.15, maxOutputTokens: 400 } };
   if (system) body.systemInstruction = { parts: [{ text: system }] };
   const response = await fetchImpl(endpoint, {
     method: 'POST',

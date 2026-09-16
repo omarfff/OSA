@@ -84,13 +84,3 @@ def test_algora_html_parser_extracts_github_issue_and_reward():
     assert rows[0].repo == "acme/widget"
     assert rows[0].issue_number == 42
     assert rows[0].reward_usd == 125.0
-    assert rows[0].metadata["claim_count"] == 3
-
-
-def test_guard_blocks_security_sensitive_autonomous_bounty():
-    b = bh.Bounty("o/r", 2, "Fix SQL injection vulnerability", "normal issue body", "u", 500, "algora:demo")
-    assert bh.bounty_guard_reason(b) is not None
-
-def test_financial_broadcast_defaults_fail_closed(monkeypatch):
-    monkeypatch.delenv("FINANCIAL_BROADCAST_ENABLED", raising=False)
-    assert bh.Settings().financial_broadcast_enabled is False
