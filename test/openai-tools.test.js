@@ -11,4 +11,6 @@ test('closing tool surface is intentionally narrow and strict', () => {
   }
   const text = JSON.stringify(CLOSING_TOOL_DEFINITIONS).toLowerCase();
   for (const forbidden of ['payout', 'refund', 'transfer_funds', 'sign_transaction', 'accept_terms']) assert.equal(text.includes(forbidden), false);
+  const checkout = CLOSING_TOOL_DEFINITIONS.find((tool) => tool.name === 'create_checkout');
+  assert.deepEqual(checkout.parameters.properties.payment_rail.enum, ['invoice_request', 'pilot_usdc', 'x402']);
 });

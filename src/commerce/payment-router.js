@@ -1,6 +1,4 @@
 import { paymentOptions } from '../payment-options.js';
-import { nowPaymentsMissingConfig, nowPaymentsReady } from '../payments/nowpayments.js';
-import { tapRuntimeStatus } from '../payments/tap.js';
 
 function stripeRuntimeStatus(env = process.env) {
   const secret = String(env.STRIPE_SECRET_KEY || '').trim();
@@ -20,32 +18,31 @@ function stripeRuntimeStatus(env = process.env) {
 
 export function paymentRouterStatus(env = process.env) {
   const options = paymentOptions();
-  const nowMissing = nowPaymentsMissingConfig(env);
   const stripe = stripeRuntimeStatus(env);
-  const tap = tapRuntimeStatus(env);
-  const preferredHuman = tap.status === 'configured' ? 'tap' : 'direct_usdc';
   return {
-    version: 3,
-    preferredHuman,
-    preferredFiat: 'tap',
-    preferredAgent: options.x402.status === 'enabled' && options.x402.environment === 'mainnet' ? 'x402' : 'direct_usdc',
-    settlementPreference: ['USDC', 'USDT', 'BTC'],
+    version: 4,
+    product: options.product,
+    preferredHuman: 'invoice_request',
+    preferredInstantHuman: 'pilot_usdc',
+    preferredAgent: options.x402.status === 'enabled' && options.x402.environment === 'mainnet' ? 'x402' : 'pilot_usdc',
     rails: {
-      tap: {
-        ...tap,
-        activation: 'tap_live_merchant_plus_https_post_and_redirect',
-        checkout: 'hosted_src_all',
-        countryPriority: 'SA',
-        supports: ['mada', 'card', 'apple_pay', 'google_pay', 'stc_pay', 'samsung_pay', 'bnpl_when_enabled'],
-        currencyDefault: 'SAR',
-        revenueProof: 'tap_charge_captured_plus_independent_retrieval',
+      invoice_request: {
+        status: 'request_ready',
+        mode: 'assisted',
+        amount: options.product.amount,
+        currency: options.product.currency,
+        publicBankDetails: false,
+        revenueProof: 'reconciled_bank_settlement_plus_matching_invoice',
       },
-      direct_usdc: {
+      pilot_usdc: {
         status: 'ready',
-        network: 'eip155:8453',
+        mode: 'live',
+        amount: options.product.amount,
+        currency: options.product.currency,
         asset: 'USDC',
+        networks: options.directCrypto.map((entry) => entry.network),
         address: options.preferred.humanStablecoin.address,
-        revenueProof: 'verified_chain_receipt_plus_matching_crypto_order',
+        revenueProof: 'verified_chain_receipt_plus_matching_pilot_order',
       },
       x402: {
         status: options.x402.status,
@@ -53,43 +50,33 @@ export function paymentRouterStatus(env = process.env) {
         network: options.x402.network,
         asset: options.x402.asset,
         payTo: options.x402.payTo,
+        audience: 'agent',
         revenueProof: 'mainnet_settlement_tx_plus_settlement_success',
       },
-      nowpayments: {
-        status: nowPaymentsReady(env) ? 'configured' : 'not_configured',
-        missing: nowMissing,
-        activation: 'merchant_api_key_ipn_secret_https_callback',
-        currencyDiscovery: nowPaymentsReady(env) ? 'dynamic_api' : 'blocked_until_configured',
-        revenueProof: 'verified_ipn_finished_plus_independent_receipt',
+      card_wallet: {
+        status: 'not_live',
+        providerStatus: stripe.status,
+        providerMode: stripe.mode,
+        missing: stripe.missing,
+        advertised: false,
+        supports: ['card', 'apple_pay', 'google_pay', 'mada'],
+        reason: 'no_live_merchant_rail',
       },
-      stripe: {
-        ...stripe,
-        priority: 'backup_only',
-        activation: 'live_merchant_account_plus_webhook',
-        supports: ['card', 'apple_pay', 'google_pay'],
-        revenueProof: 'live_payment_success_plus_independent_stripe_retrieval',
+      tap: {
+        status: 'disabled_by_owner',
+        advertised: false,
+        selectable: false,
       },
-      paytabs: {
-        status: 'not_configured',
-        priority: 'fallback_if_tap_blocked',
-        activation: 'merchant_onboarding_and_live_credentials',
-      },
-    },
-    acceptance: {
-      directCrypto: options.directCrypto,
-      fiat: {
-        ...options.fiat,
-        tap: { status: tap.status, mode: tap.mode, primary: true },
-        stripe: { status: stripe.status, mode: stripe.mode, primary: false },
-        paytabs: { status: 'not_configured', primary: false },
-      },
-      agent: options.preferred.agent,
-      broadCryptoAggregator: {
-        provider: 'nowpayments',
-        status: nowPaymentsReady(env) ? 'configured' : 'not_configured',
+      legacy_five_dollar_checkout: {
+        status: 'retired',
+        advertised: false,
+        selectable: false,
       },
     },
+    customerMethods: options.customerMethods,
     safety: {
+      oneHumanProduct: true,
+      neverCountRequestAsRevenue: true,
       neverCountTestModeAsRevenue: true,
       neverAdvertiseUnverifiedReceiveNetwork: true,
       neverRouteToUnconfiguredFiat: true,
@@ -103,7 +90,7 @@ export function selectPaymentRail({ requestedRail, customerType = 'human', env =
   const requested = String(requestedRail || '').trim().toLowerCase();
   if (requested) {
     if (!Object.hasOwn(status.rails, requested)) throw new Error('PAYMENT_RAIL_UNSUPPORTED');
-    if (['not_configured', 'wallet_ready_facilitator_pending', 'test_only'].includes(status.rails[requested].status)) throw new Error('PAYMENT_RAIL_NOT_READY');
+    if (!['ready', 'request_ready', 'enabled'].includes(status.rails[requested].status)) throw new Error('PAYMENT_RAIL_NOT_READY');
     if (requested === 'x402' && status.rails.x402.environment !== 'mainnet') throw new Error('PAYMENT_RAIL_NOT_MAINNET');
     return { rail: requested, ...status.rails[requested] };
   }

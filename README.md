@@ -51,7 +51,7 @@ npm start
 
 ## Payments
 
-Optional x402 v2 payment middleware can protect `/best` and `/score`. Payments remain disabled when `OSA_PAY_TO` is not configured. Test/sandbox payment events must never be counted as revenue.
+The public checkout exposes one human product: the $79 OSA 30-Day MCP Reliability Pilot. A buyer can request a private invoice/bank-transfer route or pay immediately with USDC on a verifier-backed network. Card and mobile-wallet buttons stay hidden until a live merchant rail is independently verified. Tap is owner-disabled. Optional x402 v2 middleware remains the machine-payment path for `/best` and `/score` when `OSA_PAY_TO` is configured. Requests, test events, page views, and wallet connections are never counted as revenue.
 
 ## Operating rule
 

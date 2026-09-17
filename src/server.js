@@ -4,6 +4,7 @@ import { normalizeEndpoint, calculateTrustScore, liveVerify } from "./core.js";
 import { addSnapshot, historyFor, latestSnapshot, listEndpoints, storeMode, upsertEndpoint } from "./store.js";
 import { buildPaymentMiddleware } from "./x402.js";
 import { paymentOptions } from "./payment-options.js";
+import { paymentRouterStatus } from "./commerce/payment-router.js";
 
 const app = express();
 // The Oracle is only exposed behind an internal reverse proxy. Trust one proxy hop
@@ -78,6 +79,7 @@ app.get("/health", (_req, res) => {
 });
 
 app.get("/payment-options", (_req, res) => res.json(paymentOptions()));
+app.get("/checkout-options", (_req, res) => res.json(paymentRouterStatus()));
 
 
 
@@ -163,7 +165,7 @@ app.get("/.well-known/osa.json", (_req, res) => res.json({
   name: "OSA Agent Trust Oracle",
   version: "0.3.2",
   description: "Pre-purchase trust scoring and live verification for agent/API endpoints.",
-  endpoints: ["GET /best", "GET /score", "GET /history", "GET /payment-options", "POST /ingest", "POST /sources/mcp", "POST /sources/bazaar"],
+  endpoints: ["GET /best", "GET /score", "GET /history", "GET /payment-options", "GET /checkout-options", "POST /ingest", "POST /sources/mcp", "POST /sources/bazaar"],
   security: { ssrfProtection: true, ingestAuthentication: true, responseByteLimit: true, boundedConcurrency: true },
   x402: (() => { const x = paymentOptions().x402; return { enabled: x.status === "enabled", network: x.network, environment: x.environment, currency: x.asset }; })(),
   output: ["endpoint", "score", "confidence", "alternatives", "reasonCodes"]
