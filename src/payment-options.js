@@ -1,102 +1,134 @@
 import { resolveX402Config } from "./x402.js";
 
-// Public receive-address fallbacks correspond to active mainnet RECEIVE entries
-// in the canonical OSA wallet registry. Treasury/provider wallets must never be
-// advertised as generic customer receive addresses.
 const DEFAULTS = Object.freeze({
-  base: "0x559FbeCe1e1517d5cb0eD9FcB6D3383D58cf48d4",
-  evm: "0x7A6F08C684f16B74BE7Ff499bB8A24a4EF3cf66b",
+  pilotEvm: "0xCc34D733F5f387d0128021E636D023472CB5df0c",
   x402: "0xCc34D733F5f387d0128021E636D023472CB5df0c",
   solana: "Fo6hiVofJdgHjnwPqwdBXs22QLd9oLLypiSUyrryinj5",
   solanaProof: "supabase:osa_wallet_registry:4e482f48-463c-4e9e-a5db-ce78818421e7",
   tron: "TXzMju2v6QoevWaMkPaSwEuN6HbFibWW7o",
   tronProof: "supabase:osa_wallet_registry:3550acc9-d347-443c-a432-4f522a6796a5",
-  bitcoin: "bc1qzxqxvp9nauw673cdjfj083hasxwvn7uwzqgahm"
 });
 
+const PILOT_NETWORKS = Object.freeze([
+  Object.freeze({ network: "Base", caip2: "eip155:8453", asset: "USDC" }),
+  Object.freeze({ network: "Polygon", caip2: "eip155:137", asset: "USDC" }),
+  Object.freeze({ network: "Arbitrum", caip2: "eip155:42161", asset: "USDC" }),
+]);
+
 function requiredAddr(envName, fallback) {
-  const value = String(process.env[envName] || "").trim();
-  return value || fallback;
+  return String(process.env[envName] || "").trim() || fallback;
 }
 
-function optionalAddr(envName) {
-  return String(process.env[envName] || "").trim() || null;
+function inventoryWallet({ addressEnv, proofEnv, addressFallback, proofFallback, network }) {
+  const override = String(process.env[addressEnv] || "").trim();
+  const proofOverride = String(process.env[proofEnv] || "").trim();
+  const address = override || addressFallback;
+  const ownershipProofRef = override ? proofOverride : (proofOverride || proofFallback);
+  const status = address && ownershipProofRef ? "verified_receive" : "ownership_unverified";
+  return {
+    network,
+    status,
+    address: status === "verified_receive" ? address : null,
+    ownershipProofRef,
+    checkoutStatus: "not_enabled_for_pilot",
+  };
 }
 
 export function paymentOptions() {
-  const base = requiredAddr("OSA_BASE_RECEIVE_ADDRESS", DEFAULTS.base);
-  const evm = requiredAddr("OSA_EVM_RECEIVE_ADDRESS", DEFAULTS.evm);
+  const pilotAddress = requiredAddr("OSA_PILOT_USDC_RECEIVE_ADDRESS", DEFAULTS.pilotEvm);
   const x402Receive = requiredAddr("OSA_X402_RECEIVE_ADDRESS", DEFAULTS.x402);
-
-  const solanaOverride = optionalAddr("OSA_SOLANA_RECEIVE_ADDRESS");
-  const solanaProofOverride = optionalAddr("OSA_SOLANA_OWNERSHIP_PROOF_REF");
-  const solana = solanaOverride || DEFAULTS.solana;
-  const solanaOwnershipProofRef = solanaOverride
-    ? solanaProofOverride
-    : (solanaProofOverride || DEFAULTS.solanaProof);
-  const solanaState = solana && solanaOwnershipProofRef ? "verified_receive" : "ownership_unverified";
-
-  const tronOverride = optionalAddr("OSA_TRON_RECEIVE_ADDRESS");
-  const tronProofOverride = optionalAddr("OSA_TRON_OWNERSHIP_PROOF_REF");
-  const tron = tronOverride || DEFAULTS.tron;
-  const tronOwnershipProofRef = tronOverride
-    ? tronProofOverride
-    : (tronProofOverride || DEFAULTS.tronProof);
-  const tronState = tron && tronOwnershipProofRef ? "verified_receive" : "ownership_unverified";
-
-  const bitcoin = requiredAddr("OSA_BITCOIN_RECEIVE_ADDRESS", DEFAULTS.bitcoin);
+  const solana = inventoryWallet({
+    addressEnv: "OSA_SOLANA_RECEIVE_ADDRESS",
+    proofEnv: "OSA_SOLANA_OWNERSHIP_PROOF_REF",
+    addressFallback: DEFAULTS.solana,
+    proofFallback: DEFAULTS.solanaProof,
+    network: "Solana",
+  });
+  const tron = inventoryWallet({
+    addressEnv: "OSA_TRON_RECEIVE_ADDRESS",
+    proofEnv: "OSA_TRON_OWNERSHIP_PROOF_REF",
+    addressFallback: DEFAULTS.tron,
+    proofFallback: DEFAULTS.tronProof,
+    network: "TRON",
+  });
   const x402Config = resolveX402Config(process.env);
   const x402Enabled = Boolean(x402Config);
   const x402Network = x402Config?.network || "eip155:8453";
   const x402Environment = x402Config ? (x402Config.isTestnet ? "testnet" : "mainnet") : "not_configured";
 
   return {
-    version: 5,
+    version: 6,
+    product: {
+      id: "mcp_reliability_pilot_30d",
+      sku: "OSA-MCP-RELIABILITY-30D",
+      name: "OSA 30-Day MCP Reliability Pilot",
+      amount: 79,
+      currency: "USD",
+    },
+    experience: {
+      strategy: "adaptive_single_product",
+      humanDefault: "invoice_request",
+      instantOption: "pilot_usdc",
+      agentDefault: "x402",
+      customerCreatesWallet: false,
+      customerUsesExistingWallet: true,
+    },
     preferred: {
-      humanStablecoin: { network: "Base", asset: "USDC", address: base },
+      human: { rail: "invoice_request", status: "request_ready" },
+      humanStablecoin: { rail: "pilot_usdc", network: "Base", asset: "USDC", address: pilotAddress },
       agent: {
+        rail: "x402",
         protocol: "x402",
         network: x402Network,
         asset: "USDC",
         status: x402Enabled ? "enabled" : "wallet_ready_facilitator_pending",
         environment: x402Environment,
-        payTo: x402Config?.payTo || x402Receive
+        payTo: x402Config?.payTo || x402Receive,
       },
-      broadCryptoFallback: { network: "TRON", asset: "USDT", status: tronState, address: tronState === "verified_receive" ? tron : null }
     },
-    solana: { status: solanaState, address: solanaState === "verified_receive" ? solana : null, ownershipProofRef: solanaOwnershipProofRef },
-    tron: { status: tronState, address: tronState === "verified_receive" ? tron : null, ownershipProofRef: tronOwnershipProofRef },
-    directCrypto: [
-      { network: "Base", caip2: "eip155:8453", assets: ["USDC", "ETH"], address: base },
-      { network: "Ethereum", caip2: "eip155:1", assets: ["USDC", "USDT", "ETH"], address: evm },
-      { network: "Arbitrum", caip2: "eip155:42161", assets: ["USDC", "USDT", "ETH"], address: evm },
-      { network: "Optimism", caip2: "eip155:10", assets: ["USDC", "USDT", "ETH"], address: evm },
-      { network: "Polygon", caip2: "eip155:137", assets: ["USDC", "USDT", "POL"], address: evm },
-      ...(solanaState === "verified_receive" ? [{ network: "Solana", caip2: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", assets: ["USDC", "USDT", "SOL"], address: solana }] : []),
-      ...(tronState === "verified_receive" ? [{ network: "TRON", assets: ["USDT", "TRX"], address: tron }] : []),
-      { network: "Bitcoin", assets: ["BTC"], address: bitcoin, addressType: "P2WPKH" }
+    customerMethods: [
+      {
+        rail: "invoice_request",
+        label: "Invoice / bank transfer",
+        status: "request_ready",
+        settlement: "reconciled_before_fulfillment",
+        publicBankDetails: false,
+      },
+      {
+        rail: "pilot_usdc",
+        label: "Pay with a crypto wallet",
+        status: "ready",
+        asset: "USDC",
+        networks: PILOT_NETWORKS.map(({ network }) => network),
+        walletCompatibility: "Any wallet or exchange that can send native USDC on the selected network",
+        examples: ["Coinbase Wallet", "MetaMask", "Trust Wallet", "Binance Wallet"],
+      },
     ],
+    directCrypto: PILOT_NETWORKS.map((entry) => ({ ...entry, assets: [entry.asset], address: pilotAddress })),
+    walletInventory: { solana, tron },
     fiat: {
-      card: { status: "pending_merchant_activation" },
-      applePay: { status: "pending_merchant_activation" },
-      googlePay: { status: "pending_merchant_activation" },
-      bankTransfer: { status: "private_on_request", publicBankDetails: false }
+      invoiceRequest: { status: "request_ready", publicBankDetails: false },
+      card: { status: "not_live", advertised: false },
+      applePay: { status: "not_live", advertised: false },
+      mada: { status: "not_live", advertised: false },
     },
     x402: {
       status: x402Enabled ? "enabled" : "wallet_ready_facilitator_pending",
       payTo: x402Config?.payTo || x402Receive,
       network: x402Network,
       asset: "USDC",
-      environment: x402Environment
+      environment: x402Environment,
     },
     safety: {
-      networkSpecific: true,
-      registryAlignedFallbacks: true,
-      unverifiedNetworksAdvertised: false,
-      separateBaseAndGenericEvmReceive: true,
-      ownershipProofBoundToAddress: true,
-      instruction: "Send only an asset listed for the selected network. Transactions sent on an unsupported network may be unrecoverable.",
-      secretsExposed: false
-    }
+      oneHumanProduct: true,
+      tapDisabledByOwner: true,
+      staleFiveDollarSkuAdvertised: false,
+      onlyVerifierBackedNetworksAdvertised: true,
+      invoiceRequestIsNotPayment: true,
+      fulfillmentRequiresIndependentPaymentEvidence: true,
+      buyerWalletCustody: false,
+      secretsExposed: false,
+      instruction: "Use only native USDC on the selected network. A request, wallet connection, page view, or transaction hash alone is not payment proof.",
+    },
   };
 }

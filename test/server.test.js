@@ -36,25 +36,29 @@ test('rejects invalid history limit and max price', async () => {
   assert.equal((await fetch(`${base}/best?max_price=-1`)).status, 400);
 });
 
-test('payment options expose verified multi-network receive rails', async () => {
+test('payment options expose one product and only verifier-backed checkout rails', async () => {
   const response = await fetch(`${base}/payment-options`);
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.version, 5);
+  assert.equal(body.version, 6);
+  assert.equal(body.product.sku, 'OSA-MCP-RELIABILITY-30D');
   assert.equal(body.preferred.humanStablecoin.network, 'Base');
   assert.equal(body.preferred.humanStablecoin.asset, 'USDC');
-  assert.equal(body.solana.status, 'verified_receive');
-  assert.equal(body.tron.status, 'verified_receive');
-  assert.equal(body.directCrypto.some((x) => x.network === 'Solana'), true);
-  assert.equal(body.directCrypto.some((x) => x.network === 'TRON'), true);
-  assert.equal(body.directCrypto.some((x) => x.network === 'Bitcoin'), true);
-  assert.equal(body.directCrypto.some((x) => x.network === 'Base'), true);
-  for (const network of ['Ethereum', 'Arbitrum', 'Optimism', 'Polygon']) {
-    assert.equal(body.directCrypto.some((x) => x.network === network), true);
-  }
-  assert.equal(body.fiat.bankTransfer.publicBankDetails, false);
-  assert.equal(body.safety.registryAlignedFallbacks, true);
-  assert.equal(body.safety.unverifiedNetworksAdvertised, false);
-  assert.equal(body.safety.separateBaseAndGenericEvmReceive, true);
+  assert.deepEqual(body.directCrypto.map((x) => x.network), ['Base', 'Polygon', 'Arbitrum']);
+  assert.equal(body.fiat.invoiceRequest.publicBankDetails, false);
+  assert.equal(body.safety.tapDisabledByOwner, true);
+  assert.equal(body.safety.onlyVerifierBackedNetworksAdvertised, true);
   assert.equal(body.safety.secretsExposed, false);
+});
+
+test('checkout options keep assisted invoice and instant wallet paths distinct', async () => {
+  const response = await fetch(`${base}/checkout-options`);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.preferredHuman, 'invoice_request');
+  assert.equal(body.preferredInstantHuman, 'pilot_usdc');
+  assert.equal(body.rails.invoice_request.status, 'request_ready');
+  assert.equal(body.rails.pilot_usdc.status, 'ready');
+  assert.equal(body.rails.tap.status, 'disabled_by_owner');
+  assert.equal(body.rails.legacy_five_dollar_checkout.status, 'retired');
 });
