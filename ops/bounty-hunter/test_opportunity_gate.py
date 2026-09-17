@@ -77,6 +77,12 @@ def test_rejects_mirror_repo():
     assert evaluate(repo="someone/bounty-plaza").decision == "reject"
 
 
+def test_rejects_duplicate_mirror_title():
+    result = evaluate(title="[Bounty] [Bounty] Fix parser bug")
+    assert result.decision == "reject"
+    assert "duplicated" in result.reason.lower()
+
+
 def test_rejects_crowded_thread():
     result = evaluate(comments=12)
     assert result.decision == "reject"
