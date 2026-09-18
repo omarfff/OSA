@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { captureRealEstateSource } from './browser.js';
 import { summarizeSourceCapture } from './parser.js';
-import { attachOpportunityFeedback, defaultLearningState, updateLearningState } from './learner.js';
+import { attachOpportunityFeedback, defaultLearningState, recordOpportunityEvents, updateLearningState } from './learner.js';
 import { rankPropertyOpportunities } from './opportunity.js';
 import { REAL_ESTATE_SOURCES } from './sources.js';
 
@@ -111,12 +111,17 @@ export async function runRealEstateHunterCycle(options = {}) {
 
   const market = marketStats(results);
   const previousLearning = await readJson(learningFile, defaultLearningState());
-  let learningState = updateLearningState(previousLearning, aqarListings, new Date());
+  const now = new Date();
+  const saleSourceHealthy = results.some((x) => x.sourceId === 'aqar-buildings-sale-jeddah' && x.state === 'LIVE');
+  let learningState = updateLearningState(previousLearning, aqarListings, now, {
+    healthyCycle: saleSourceHealthy,
+  });
   const opportunities = rankPropertyOpportunities(aqarListings, {
     learningState,
     officialJeddah: market.officialJeddah,
   });
   learningState = attachOpportunityFeedback(learningState, opportunities);
+  learningState = recordOpportunityEvents(learningState, opportunities, now);
   await atomicWriteJson(learningFile, learningState);
 
   const alerts = opportunities
@@ -145,6 +150,10 @@ export async function runRealEstateHunterCycle(options = {}) {
     market,
     alerts,
     opportunities: opportunities.slice(0, 25),
+    recentOpportunityEvents: (learningState.opportunityEvents || [])
+      .filter((x) => now.getTime() - Number(x.lastSeenMs || x.firstSeenMs || 0) <= 48 * 3600 * 1000)
+      .sort((a, b) => Number(b.maxScore || 0) - Number(a.maxScore || 0))
+      .slice(0, 30),
     training: {
       cycles: learningState.stats?.cycles || 0,
       fastExitProxyCount: learningState.stats?.fastExitProxyCount || 0,
@@ -167,6 +176,7 @@ export async function runRealEstateHunterCycle(options = {}) {
     summary: latest.summary,
     market: latest.market,
     alerts: latest.alerts.slice(0, 5),
+    recentOpportunityEvents: latest.recentOpportunityEvents.slice(0, 10),
     training: latest.training,
     sourceStates: latest.sources.map((x) => ({ sourceId: x.sourceId, state: x.state })),
   });
