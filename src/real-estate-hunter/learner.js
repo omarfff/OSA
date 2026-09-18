@@ -105,6 +105,18 @@ export function updateLearningState(previousState, listings = [], now = new Date
     ? structuredClone(previousState)
     : defaultLearningState();
 
+  state.listings ||= {};
+  state.saleSamplesByDistrict ||= {};
+  state.rentSamplesByDistrict ||= {};
+  state.outcomes ||= [];
+  state.opportunityEvents ||= [];
+  state.thresholds ||= {
+    mustNotMissScore: 86,
+    strongInspectScore: 76,
+    minDiscountPct: 18,
+  };
+  state.stats ||= { cycles: 0, fastExitProxyCount: 0, staleProxyCount: 0 };
+
   const nowMs = now.getTime();
   const current = new Map();
 
