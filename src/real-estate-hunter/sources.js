@@ -35,11 +35,11 @@ export const REAL_ESTATE_SOURCES = Object.freeze([
     url: 'https://suhail.ai/',
   },
   {
-    id: 'srem-gateway',
+    id: 'srem-offers-service',
     platform: 'srem',
     kind: 'official_exchange',
     city: 'Saudi Arabia',
-    url: 'https://nafath-srem.moj.gov.sa/',
+    url: 'https://www.moj.gov.sa/ar/eServices/Pages/1fcb5dc7-ad69-4578-821a-1009b73dcc43.aspx',
     authExpected: true,
   },
 ]);
