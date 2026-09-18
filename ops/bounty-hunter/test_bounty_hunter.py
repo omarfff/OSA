@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
 
 import bounty_hunter as bh
@@ -94,3 +95,49 @@ def test_guard_blocks_security_sensitive_autonomous_bounty():
 def test_financial_broadcast_defaults_fail_closed(monkeypatch):
     monkeypatch.delenv("FINANCIAL_BROADCAST_ENABLED", raising=False)
     assert bh.Settings().financial_broadcast_enabled is False
+
+
+def test_auto_attempt_defaults_to_human_gated(monkeypatch):
+    monkeypatch.delenv("AUTO_ATTEMPT", raising=False)
+    assert bh.Settings().auto_attempt is False
+
+
+def test_state_store_records_preparation_once(tmp_path: Path):
+    store = bh.StateStore(tmp_path / "state.db")
+    store.record_preparation("o/r#7", {"tests": [{"ok": True}]}, "prepared_tested")
+    row = store.get_preparation("o/r#7")
+    assert row is not None
+    assert row["status"] == "prepared_tested"
+
+
+def test_process_prepares_with_router_before_human_gated_attempt(tmp_path: Path):
+    hunter = object.__new__(bh.BountyHunter)
+    hunter.s = SimpleNamespace(
+        min_bounty_usd=50, attempt_ttl_hours=96, max_active_attempts=2,
+        max_existing_attempts=4, github_token="", github_cli_bridge=False,
+        ai_min_score=78, auto_prepare_fix=True, auto_attempt=False,
+    )
+    hunter.store = bh.StateStore(tmp_path / "state.db")
+    posted = []
+    hunter.github = SimpleNamespace(
+        fetch_issue=lambda _repo, _number: {"state": "open", "locked": False, "assignees": [], "body": "Algora /attempt #7 then /claim #7", "title": "Fix parser"},
+        existing_attempts=lambda _repo, _number: (0, False),
+        post_attempt=lambda *_args: posted.append(True),
+    )
+    hunter.ai = SimpleNamespace(
+        client=None, router=object(),
+        analyze=lambda _bounty, _attempts: {"score": 91, "should_attempt": True, "plan": ["Fix"], "keywords": ["parser"]},
+    )
+    prepared = []
+    hunter.fixer = SimpleNamespace(prepare=lambda _bounty, _keywords: prepared.append(True) or {"tests": [{"ok": True}], "workspace": "/tmp/work", "summary": "fixed"})
+    notices = []
+    hunter.notifier = SimpleNamespace(send=notices.append)
+    bounty = bh.Bounty("o/r", 7, "Fix parser", "Algora /attempt #7 then /claim #7", "https://github.com/o/r/issues/7", 100, "algora:o")
+
+    hunter.process_bounty(bounty)
+    hunter.process_bounty(bounty)
+
+    assert len(prepared) == 1
+    assert posted == []
+    assert hunter.store.get_preparation(bounty.key)["status"] == "prepared_tested"
+    assert any("human-gated" in notice for notice in notices)
