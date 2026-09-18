@@ -71,7 +71,8 @@ systemctl daemon-reload
 # Public Algora discovery and prepare-first analysis do not require a GitHub
 # write token. AUTO_ATTEMPT defaults to false; a token is required only if an
 # operator explicitly enables external /attempt posting.
-systemctl enable --now osa-bounty-hunter.service
+systemctl enable osa-bounty-hunter.service >/dev/null
+systemctl restart osa-bounty-hunter.service
 sleep 2
 systemctl --no-pager --full status osa-bounty-hunter.service || true
 
