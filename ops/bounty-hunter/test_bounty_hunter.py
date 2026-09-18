@@ -141,3 +141,9 @@ def test_process_prepares_with_router_before_human_gated_attempt(tmp_path: Path)
     assert posted == []
     assert hunter.store.get_preparation(bounty.key)["status"] == "prepared_tested"
     assert any("human-gated" in notice for notice in notices)
+
+
+def test_installer_keeps_public_prepare_first_worker_enabled_without_github_write_token():
+    source = Path("ops/install-bounty-hunter.sh").read_text(encoding="utf-8")
+    assert "systemctl enable --now osa-bounty-hunter.service" in source
+    assert "grep -Eq '^GITHUB_TOKEN=.+$'" not in source
