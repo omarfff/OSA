@@ -7,6 +7,9 @@ runRealEstateHunterCycle()
       generatedAt: result.generatedAt,
       summary: result.summary,
       market: result.market,
+      alerts: result.alerts,
+      training: result.training,
+      recentOpportunityEvents: result.recentOpportunityEvents,
       sources: result.sources.map((source) => ({
         sourceId: source.sourceId,
         state: source.state,

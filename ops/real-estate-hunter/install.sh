@@ -47,6 +47,7 @@ WorkingDirectory=$STATE_DIR
 Environment=OSA_REAL_ESTATE_STATE_DIR=$STATE_DIR
 Environment=OSA_REAL_ESTATE_LATEST=$STATE_DIR/latest.json
 Environment=OSA_REAL_ESTATE_HISTORY=$STATE_DIR/history.jsonl
+Environment=OSA_REAL_ESTATE_LEARNING=$STATE_DIR/learning.json
 Environment=OSA_REAL_ESTATE_BROWSER_BINARY=/usr/local/bin/agent-browser
 Environment=OSA_REAL_ESTATE_WAIT_MS=1800
 ExecStart=/usr/bin/node $LIB_DIR/tools/real-estate-hunter.mjs
@@ -75,12 +76,12 @@ UNITEOF
 
 cat > "$TIMER" <<UNITEOF
 [Unit]
-Description=Run OSA Real Estate Hunter hourly
+Description=Run OSA Real Estate Hunter every 30 minutes
 
 [Timer]
 OnBootSec=7min
-OnUnitActiveSec=1h
-RandomizedDelaySec=300
+OnUnitActiveSec=30min
+RandomizedDelaySec=120
 Persistent=true
 Unit=osa-real-estate-hunter.service
 

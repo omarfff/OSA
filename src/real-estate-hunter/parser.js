@@ -50,6 +50,31 @@ function cleanCardText(value = '') {
   return String(value).replace(/\s+/g, ' ').trim();
 }
 
+function extractDistrict(title = '') {
+  const match = String(title).match(/حي\s+([^,،]+)/i);
+  return match ? match[1].trim() : null;
+}
+
+function propertyTypeFromTitle(title = '') {
+  const value = String(title);
+  if (/عمارة/i.test(value)) return 'building';
+  if (/شقة/i.test(value)) return 'apartment';
+  if (/فيلا/i.test(value)) return 'villa';
+  if (/أرض|ارض/i.test(value)) return 'land';
+  if (/استوديو/i.test(value)) return 'studio';
+  if (/دور/i.test(value)) return 'floor';
+  return 'other';
+}
+
+function listingDataQuality({ listingType, propertyType, priceSar, areaSqm }) {
+  if (!Number.isFinite(priceSar) || !Number.isFinite(areaSqm)) return 'LOW';
+  if (areaSqm < 20 || areaSqm > 10000) return 'LOW';
+  if (['apartment', 'studio'].includes(propertyType) && areaSqm > 600) return 'LOW';
+  if (listingType === 'rent' && priceSar < 8000) return 'LOW';
+  if (listingType === 'sale' && priceSar < 250000) return 'LOW';
+  return 'GOOD';
+}
+
 export function extractAqarListings(text = '', options = {}) {
   const value = normalizeArabicDigits(text);
   const listings = [];
@@ -67,9 +92,15 @@ export function extractAqarListings(text = '', options = {}) {
     seen.add(key);
 
     const listingType = /للإيجار/i.test(title) ? 'rent' : 'sale';
+    const propertyType = propertyTypeFromTitle(title);
+    const district = extractDistrict(title);
+    const dataQuality = listingDataQuality({ listingType, propertyType, priceSar, areaSqm });
     listings.push({
       title,
       listingType,
+      propertyType,
+      district,
+      dataQuality,
       priceSar,
       areaSqm,
       pricePerSqmSar: Math.round(priceSar / areaSqm),
