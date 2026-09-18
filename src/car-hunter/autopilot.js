@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { collectPublicHaraj } from './collector.js';
+import { verifyRankedHarajCandidates } from './browser-verifier.js';
 import { analyzePriceHistory, assessDeal, listingFingerprint } from './index.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -141,7 +142,49 @@ export async function runCarHunterCycle(options = {}) {
       || b.scores.deal - a.scores.deal
       || (b.netUpsideSar || 0) - (a.netUpsideSar || 0));
 
+  const visualVerify = options.visualVerify
+    ?? String(process.env.OSA_CAR_HUNTER_VISUAL_VERIFY || '0') === '1';
+  const visualVerifier = options.visualVerifier || verifyRankedHarajCandidates;
+  let browserVerification = {
+    enabled: visualVerify,
+    attempted: 0,
+    verified: [],
+    attempts: [],
+    unavailable: 0,
+    sold: 0,
+    blocked: 0,
+    errors: 0,
+  };
+
+  if (visualVerify) {
+    browserVerification = {
+      enabled: true,
+      ...(await visualVerifier(assessments, {
+        maxCandidates: options.visualMaxCandidates
+          ?? Number(process.env.OSA_CAR_HUNTER_VISUAL_MAX_CANDIDATES || 3),
+        maxVerified: options.visualMaxVerified
+          ?? Number(process.env.OSA_CAR_HUNTER_VISUAL_MAX_VERIFIED || 1),
+        waitMs: options.visualWaitMs
+          ?? Number(process.env.OSA_CAR_HUNTER_VISUAL_WAIT_MS || 1600),
+        evidenceDir: options.evidenceDir
+          || process.env.OSA_CAR_HUNTER_EVIDENCE_DIR
+          || '/var/lib/osa-car-hunter/evidence',
+        binary: options.browserBinary
+          || process.env.OSA_CAR_HUNTER_BROWSER_BINARY
+          || '/usr/local/bin/agent-browser',
+        profile: options.browserProfile
+          || process.env.OSA_CAR_HUNTER_BROWSER_PROFILE
+          || '/var/lib/osa-car-hunter/browser-profile',
+        browserRunner: options.browserRunner,
+      })),
+    };
+  }
+
   pruneState(updated, now.getTime(), options.state || {});
+  const eligibleAlerts = assessments
+    .filter((x) => ['BUY_CANDIDATE', 'INSPECT'].includes(x.status))
+    .slice(0, 12);
+  const alerts = visualVerify ? browserVerification.verified : eligibleAlerts;
   const latest = {
     generatedAt: nowIso,
     source: collection.source,
@@ -153,8 +196,21 @@ export async function runCarHunterCycle(options = {}) {
       errors: collection.errors.length,
       buyCandidates: assessments.filter((x) => x.status === 'BUY_CANDIDATE').length,
       inspectCandidates: assessments.filter((x) => x.status === 'INSPECT').length,
+      browserEligible: eligibleAlerts.length,
+      browserAttempted: browserVerification.attempted,
+      browserVerified: browserVerification.verified.length,
+      browserRejected: Math.max(0, browserVerification.attempted - browserVerification.verified.length),
     },
-    alerts: assessments.filter((x) => ['BUY_CANDIDATE', 'INSPECT'].includes(x.status)).slice(0, 12),
+    alerts,
+    browserVerification: {
+      enabled: browserVerification.enabled,
+      attempted: browserVerification.attempted,
+      unavailable: browserVerification.unavailable,
+      sold: browserVerification.sold,
+      blocked: browserVerification.blocked,
+      errors: browserVerification.errors,
+      attempts: browserVerification.attempts.slice(0, 6),
+    },
     top: assessments.slice(0, 30),
     collectionErrors: collection.errors.slice(0, 20),
   };
