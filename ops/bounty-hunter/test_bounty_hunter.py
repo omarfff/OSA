@@ -147,3 +147,10 @@ def test_installer_keeps_public_prepare_first_worker_enabled_without_github_writ
     source = Path("ops/install-bounty-hunter.sh").read_text(encoding="utf-8")
     assert "systemctl enable --now osa-bounty-hunter.service" in source
     assert "grep -Eq '^GITHUB_TOKEN=.+$'" not in source
+
+
+def test_systemd_forces_prepare_first_and_human_gated_claims():
+    unit = Path("ops/systemd/osa-bounty-hunter.service").read_text(encoding="utf-8")
+    assert "Environment=AUTO_PREPARE_FIX=true" in unit
+    assert "Environment=AUTO_ATTEMPT=false" in unit
+    assert "Environment=FINANCIAL_BROADCAST_ENABLED=false" in unit
