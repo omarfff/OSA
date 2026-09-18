@@ -54,7 +54,7 @@ export function extractAqarListings(text = '', options = {}) {
   const value = normalizeArabicDigits(text);
   const listings = [];
   const seen = new Set();
-  const pattern = /((?:عمارة|شقة|فيلا|أرض|ارض|دور|استوديو)[^\n]{0,260}?(?:للبيع|للإيجار)[^\n]{0,260}?)\s+([\d,]{3,})\s*§(?:\/سنوي)?\s*([\d,]{2,})\s*م?²?/giu;
+  const pattern = /((?:عمارة|شقة|فيلا|أرض|ارض|دور|استوديو)[^\n]{0,260}?(?:للبيع|للإيجار)[^\n]{0,260}?)\s+([\d,]{3,})\s*§(?:\/سنوي)?[\s\-–•]*([\d,]{2,})\s*م?²?/giu;
   let match;
 
   while ((match = pattern.exec(value))) {
