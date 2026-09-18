@@ -11,7 +11,7 @@ import {
 } from '../src/car-hunter/browser-verifier.js';
 
 test('visual verifier only permits public Haraj URLs', () => {
-  assert.match(assertPublicHarajListingUrl('https://haraj.com.sa/11188250984/BMW_530i/'), /haraj\\.com\\.sa/);
+  assert.equal(new URL(assertPublicHarajListingUrl('https://haraj.com.sa/11188250984/BMW_530i/')).hostname, 'haraj.com.sa');
   assert.throws(() => assertPublicHarajListingUrl('https://example.com/11188250984/'), /not_allowed/);
   assert.throws(() => assertPublicHarajListingUrl('https://haraj.com.sa/api/post/1'), /internal_endpoint/);
 });
