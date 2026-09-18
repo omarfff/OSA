@@ -39,6 +39,7 @@ export function defaultLearningState() {
     saleSamplesByDistrict: {},
     rentSamplesByDistrict: {},
     outcomes: [],
+    opportunityEvents: [],
     thresholds: {
       mustNotMissScore: 86,
       strongInspectScore: 76,
@@ -99,7 +100,7 @@ function refreshThresholds(state) {
   state.stats.staleProxyCount = state.outcomes.filter((x) => x.type === 'STALE_PROXY').length;
 }
 
-export function updateLearningState(previousState, listings = [], now = new Date()) {
+export function updateLearningState(previousState, listings = [], now = new Date(), options = {}) {
   const state = previousState && previousState.version === 1
     ? structuredClone(previousState)
     : defaultLearningState();
@@ -155,6 +156,7 @@ export function updateLearningState(previousState, listings = [], now = new Date
 
   for (const tracked of Object.values(state.listings)) {
     if (current.has(tracked.fingerprint)) continue;
+    if (options.healthyCycle === false) continue;
     tracked.missingRuns = Number(tracked.missingRuns || 0) + 1;
 
     const ageMs = nowMs - Number(tracked.firstSeenMs || nowMs);
@@ -210,6 +212,55 @@ export function attachOpportunityFeedback(state, opportunities = []) {
     tracked.latestStatus = item.status;
   }
   refreshThresholds(state);
+  return state;
+}
+
+export function recordOpportunityEvents(state, opportunities = [], now = new Date()) {
+  const nowMs = now.getTime();
+  const active = new Set();
+
+  for (const item of opportunities.filter((x) => ['MUST_NOT_MISS', 'STRONG_INSPECT'].includes(x.status))) {
+    active.add(item.fingerprint);
+    let event = state.opportunityEvents.find((x) => x.fingerprint === item.fingerprint);
+    if (!event) {
+      event = {
+        fingerprint: item.fingerprint,
+        firstSeenMs: nowMs,
+        lastSeenMs: nowMs,
+        status: item.status,
+        bestStatus: item.status,
+        maxScore: item.score,
+        currentScore: item.score,
+        currentPriceSar: item.priceSar,
+        lowestPriceSar: item.priceSar,
+        district: item.district,
+        title: item.title,
+        active: true,
+      };
+      state.opportunityEvents.push(event);
+    } else {
+      event.lastSeenMs = nowMs;
+      event.status = item.status;
+      if (item.status === 'MUST_NOT_MISS') event.bestStatus = 'MUST_NOT_MISS';
+      event.maxScore = Math.max(Number(event.maxScore || 0), item.score);
+      event.currentScore = item.score;
+      event.currentPriceSar = item.priceSar;
+      event.lowestPriceSar = Math.min(Number(event.lowestPriceSar || item.priceSar), item.priceSar);
+      event.active = true;
+    }
+  }
+
+  for (const event of state.opportunityEvents) {
+    if (!active.has(event.fingerprint) && event.active) {
+      event.active = false;
+      event.disappearedMs = nowMs;
+    }
+  }
+
+  state.opportunityEvents = state.opportunityEvents
+    .filter((x) => nowMs - Number(x.lastSeenMs || x.firstSeenMs || 0) <= 7 * 24 * 3600 * 1000)
+    .slice(-300);
+
   return state;
 }
 
