@@ -10,6 +10,12 @@ if [[ -r "$ENV_FILE" ]]; then
   . "$ENV_FILE"
   set +a
 fi
+if [[ -n "$PROVIDER_ORDER_OVERRIDE" ]]; then
+  export OSA_AI_PROVIDER_ORDER="$PROVIDER_ORDER_OVERRIDE"
+fi
+if [[ -n "$MAX_OUTPUT_OVERRIDE" ]]; then
+  export OSA_AI_MAX_OUTPUT_TOKENS="$MAX_OUTPUT_OVERRIDE"
+fi
 export OSA_GEMINI_API_KEY="${OSA_GEMINI_API_KEY:-${GEMINI_API_KEY:-}}"
 export OSA_GEMINI_MODEL="${OSA_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-3.8-flash}}"
 exec /usr/bin/node "$ROOT/tools/ai-router.mjs" "$@"
