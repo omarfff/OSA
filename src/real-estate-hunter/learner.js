@@ -243,10 +243,20 @@ export function recordOpportunityEvents(state, opportunities = [], now = new Dat
         bestStatus: item.status,
         maxScore: item.score,
         currentScore: item.score,
+        confidence: item.confidence,
+        discountPct: item.discountPct,
         currentPriceSar: item.priceSar,
         lowestPriceSar: item.priceSar,
+        areaSqm: item.areaSqm,
+        pricePerSqmSar: item.pricePerSqmSar,
+        referencePricePerSqmSar: item.referencePricePerSqmSar,
+        referenceType: item.referenceType,
+        districtSaleCompCount: item.districtSaleCompCount,
+        districtRentCompCount: item.districtRentCompCount,
         district: item.district,
         title: item.title,
+        reasons: item.reasons,
+        risks: item.risks,
         active: true,
       };
       state.opportunityEvents.push(event);
@@ -256,8 +266,18 @@ export function recordOpportunityEvents(state, opportunities = [], now = new Dat
       if (item.status === 'MUST_NOT_MISS') event.bestStatus = 'MUST_NOT_MISS';
       event.maxScore = Math.max(Number(event.maxScore || 0), item.score);
       event.currentScore = item.score;
+      event.confidence = item.confidence;
+      event.discountPct = item.discountPct;
       event.currentPriceSar = item.priceSar;
       event.lowestPriceSar = Math.min(Number(event.lowestPriceSar || item.priceSar), item.priceSar);
+      event.areaSqm = item.areaSqm;
+      event.pricePerSqmSar = item.pricePerSqmSar;
+      event.referencePricePerSqmSar = item.referencePricePerSqmSar;
+      event.referenceType = item.referenceType;
+      event.districtSaleCompCount = item.districtSaleCompCount;
+      event.districtRentCompCount = item.districtRentCompCount;
+      event.reasons = item.reasons;
+      event.risks = item.risks;
       event.active = true;
     }
   }
