@@ -90,6 +90,7 @@ async function runBrowser(command, args = [], options = {}) {
     '--pin-tab',
     '--content-boundaries',
     '--max-output', '30000',
+    '--args', '--no-sandbox',
     command,
     ...args.map(String),
   ];
