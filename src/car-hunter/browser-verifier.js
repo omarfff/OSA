@@ -126,7 +126,7 @@ export async function verifyHarajCandidate(assessment, options = {}) {
     || process.env.OSA_CAR_HUNTER_EVIDENCE_DIR
     || '/var/lib/osa-car-hunter/evidence';
   const id = String(listing?.externalId || 'candidate').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const screenshotFile = path.join(evidenceDir, \`\${id}.png\`);
+  const screenshotFile = path.join(evidenceDir, `${id}.png`);
 
   let finalUrl = url;
   let text = '';
@@ -182,7 +182,7 @@ export async function verifyHarajCandidate(assessment, options = {}) {
       screenshotFile: null,
       pageText: text,
       pageTextLength: text.length,
-      stderr: cleanText(\`\${stderr}\n\${error?.message || error}\`, 4000),
+      stderr: cleanText(`${stderr}\n${error?.message || error}`, 4000),
       verifiedAt: new Date().toISOString(),
     };
   }
