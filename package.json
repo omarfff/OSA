@@ -20,7 +20,8 @@
     "ai:status": "node tools/ai-router.mjs status",
     "ai:ask": "node tools/ai-router.mjs ask",
     "car:hunt": "node tools/car-hunter.mjs",
-    "car:autopilot": "node tools/car-hunter-autopilot.mjs"
+    "car:autopilot": "node tools/car-hunter-autopilot.mjs",
+    "real-estate:hunt": "node tools/real-estate-hunter.mjs"
   },
   "engines": {
     "node": ">=20"
