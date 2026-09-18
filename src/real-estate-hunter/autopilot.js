@@ -3,6 +3,8 @@ import path from 'node:path';
 
 import { captureRealEstateSource } from './browser.js';
 import { summarizeSourceCapture } from './parser.js';
+import { attachOpportunityFeedback, defaultLearningState, updateLearningState } from './learner.js';
+import { rankPropertyOpportunities } from './opportunity.js';
 import { REAL_ESTATE_SOURCES } from './sources.js';
 
 function median(values = []) {
@@ -22,6 +24,14 @@ async function atomicWriteJson(file, value) {
 async function appendHistory(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.appendFile(file, JSON.stringify(value) + '\n', { mode: 0o600 });
+}
+
+async function readJson(file, fallback) {
+  try {
+    return JSON.parse(await fs.readFile(file, 'utf8'));
+  } catch {
+    return fallback;
+  }
 }
 
 function marketStats(sourceResults) {
@@ -78,6 +88,9 @@ export async function runRealEstateHunterCycle(options = {}) {
   const historyFile = options.historyFile
     || process.env.OSA_REAL_ESTATE_HISTORY
     || path.join(stateDir, 'history.jsonl');
+  const learningFile = options.learningFile
+    || process.env.OSA_REAL_ESTATE_LEARNING
+    || path.join(stateDir, 'learning.json');
   const sources = options.sources || REAL_ESTATE_SOURCES;
   const capture = options.captureImpl || captureRealEstateSource;
   const results = [];
@@ -92,15 +105,34 @@ export async function runRealEstateHunterCycle(options = {}) {
     results.push(summarizeSourceCapture(raw));
   }
 
+  const aqarListings = results
+    .filter((x) => x.platform === 'aqar')
+    .flatMap((x) => x.parsed?.listings || []);
+
+  const market = marketStats(results);
+  const previousLearning = await readJson(learningFile, defaultLearningState());
+  let learningState = updateLearningState(previousLearning, aqarListings, new Date());
+  const opportunities = rankPropertyOpportunities(aqarListings, {
+    learningState,
+    officialJeddah: market.officialJeddah,
+  });
+  learningState = attachOpportunityFeedback(learningState, opportunities);
+  await atomicWriteJson(learningFile, learningState);
+
+  const alerts = opportunities
+    .filter((x) => ['MUST_NOT_MISS', 'STRONG_INSPECT'].includes(x.status))
+    .slice(0, 12);
+
   const summary = {
     sources: results.length,
     live: results.filter((x) => x.state === 'LIVE').length,
     authRequired: results.filter((x) => x.state === 'AUTH_REQUIRED').length,
     blocked: results.filter((x) => x.state === 'BLOCKED').length,
     errors: results.filter((x) => x.state === 'ERROR').length,
-    aqarListingsParsed: results
-      .filter((x) => x.platform === 'aqar')
-      .reduce((sum, x) => sum + Number(x.parsed?.listingCount || 0), 0),
+    aqarListingsParsed: aqarListings.length,
+    mustNotMiss: opportunities.filter((x) => x.status === 'MUST_NOT_MISS').length,
+    strongInspect: opportunities.filter((x) => x.status === 'STRONG_INSPECT').length,
+    watch: opportunities.filter((x) => x.status === 'WATCH').length,
   };
 
   const latest = {
@@ -110,7 +142,17 @@ export async function runRealEstateHunterCycle(options = {}) {
       modes: ['investment', 'sale', 'rent', 'official-market-data'],
     },
     summary,
-    market: marketStats(results),
+    market,
+    alerts,
+    opportunities: opportunities.slice(0, 25),
+    training: {
+      cycles: learningState.stats?.cycles || 0,
+      fastExitProxyCount: learningState.stats?.fastExitProxyCount || 0,
+      staleProxyCount: learningState.stats?.staleProxyCount || 0,
+      learnedThresholds: learningState.thresholds,
+      method: 'adaptive district comps + repeated price cuts + fast-exit proxy feedback',
+      fastExitRule: 'seen in >=2 cycles, then missing for >=3 consecutive healthy cycles within 72h',
+    },
     sources: results.map(slimSource),
     policy: {
       publicPagesOnly: true,
@@ -124,6 +166,8 @@ export async function runRealEstateHunterCycle(options = {}) {
     generatedAt: latest.generatedAt,
     summary: latest.summary,
     market: latest.market,
+    alerts: latest.alerts.slice(0, 5),
+    training: latest.training,
     sourceStates: latest.sources.map((x) => ({ sourceId: x.sourceId, state: x.state })),
   });
 
