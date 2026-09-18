@@ -28,6 +28,12 @@ find "$LIB_DIR/src/car-hunter" -type f -exec chmod 0644 {} +
 
 # Validate the installed module graph before touching systemd.
 command -v agent-browser >/dev/null
+
+# agent-browser stores Chromium under the invoking user's home. The dedicated
+# Car Hunter service account needs its own browser cache because root's cache
+# is intentionally inaccessible to the hardened systemd unit.
+sudo -u "$SERVICE_USER" env HOME="$STATE_DIR" agent-browser install >/dev/null
+
 /usr/bin/node --check "$LIB_DIR/tools/car-hunter-autopilot.mjs"
 /usr/bin/node -e "import('file://$LIB_DIR/src/car-hunter/autopilot.js').then(()=>process.exit(0)).catch(e=>{console.error(e);process.exit(1)})"
 
