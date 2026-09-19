@@ -5,6 +5,9 @@ import pytest
 import bounty_hunter as bh
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
 def test_extract_reward_prefers_highest_dollar_value():
     assert bh.extract_reward("💎 $100 bounty and bonus $25") == 100.0
 
@@ -144,14 +147,14 @@ def test_process_prepares_with_router_before_human_gated_attempt(tmp_path: Path)
 
 
 def test_installer_keeps_public_prepare_first_worker_enabled_without_github_write_token():
-    source = Path("ops/install-bounty-hunter.sh").read_text(encoding="utf-8")
+    source = (REPO_ROOT / "ops/install-bounty-hunter.sh").read_text(encoding="utf-8")
     assert "systemctl enable osa-bounty-hunter.service" in source
     assert "systemctl restart osa-bounty-hunter.service" in source
     assert "grep -Eq '^GITHUB_TOKEN=.+$'" not in source
 
 
 def test_systemd_forces_prepare_first_and_human_gated_claims():
-    unit = Path("ops/systemd/osa-bounty-hunter.service").read_text(encoding="utf-8")
+    unit = (REPO_ROOT / "ops/systemd/osa-bounty-hunter.service").read_text(encoding="utf-8")
     assert "Environment=AUTO_PREPARE_FIX=true" in unit
     assert "Environment=AUTO_ATTEMPT=false" in unit
     assert "Environment=FINANCIAL_BROADCAST_ENABLED=false" in unit
