@@ -13,6 +13,10 @@ Group=osa-bounty
 WorkingDirectory=/opt/osa-bounty-hunter
 EnvironmentFile=/etc/osa-bounty-hunter.env
 Environment=PYTHONUNBUFFERED=1
+# Discovery and tested patch preparation run automatically. Public claiming is
+# kept human-gated at the service boundary even if the env file drifts.
+Environment=AUTO_PREPARE_FIX=true
+Environment=AUTO_ATTEMPT=false
 # Financial movement is fail-closed at the service boundary. Proposals and
 # simulations may run, but this daemon cannot broadcast value-moving txs.
 Environment=FINANCIAL_BROADCAST_ENABLED=false

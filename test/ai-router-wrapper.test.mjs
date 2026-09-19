@@ -10,6 +10,9 @@ test('Gemini wrapper reuses Brain env without exposing a secret value', async ()
   assert.match(wrapper, /\/etc\/osa\/brain\.env/);
   assert.match(wrapper, /OSA_GEMINI_API_KEY=.*GEMINI_API_KEY/);
   assert.match(wrapper, /gemini-3\.8-flash/);
+  assert.match(wrapper, /export OSA_AI_PROVIDER_ORDER="\$PROVIDER_ORDER_OVERRIDE"/);
+  assert.match(wrapper, /export OSA_AI_MAX_OUTPUT_TOKENS="\$MAX_OUTPUT_OVERRIDE"/);
+  assert.ok(wrapper.indexOf('export OSA_AI_PROVIDER_ORDER=') > wrapper.indexOf('. "$ENV_FILE"'));
   assert.doesNotMatch(wrapper, /AIza[0-9A-Za-z_-]{20,}/);
 });
 

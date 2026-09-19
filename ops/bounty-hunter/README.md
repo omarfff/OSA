@@ -1,14 +1,14 @@
 # OSA Autonomous Bounty Hunter
 
-Production-oriented Ubuntu 22.04 daemon for discovering Algora/GitHub bounties, posting verified `/attempt` comments, preparing AI-generated candidate patches in isolated workspaces, running allow-listed tests inside Bubblewrap, and maintaining an approval-gated Polygon financial pipeline.
+Production-oriented Ubuntu daemon for discovering Algora/GitHub bounties, preparing AI-generated candidate patches in isolated workspaces, running allow-listed tests inside Bubblewrap, and keeping any external claim or financial action behind a separate human/control-plane gate.
 
 ## Security model
 
 - GitHub/Algora discovery and candidate patch preparation are autonomous.
-- The daemon only auto-posts `/attempt` when the issue is verified as an Algora workflow and passes deterministic secret/prompt-injection guards.
+- Candidate preparation works with OpenAI or the OSA AI router (including Gemini); it is not coupled to one provider key.
+- `AUTO_ATTEMPT=false` is the default. A tested candidate is prepared first and the external `/attempt` remains human-gated. Explicitly enabling it additionally requires authenticated GitHub access.
 - Repository test commands are allow-listed and run with network disabled in Bubblewrap.
-- Financial transactions are **never** signed or broadcast merely because a threshold is met. The daemon creates a short-lived proposal and Telegram notification. A local `approve <proposal-id>` marker is required before signing/broadcasting.
-- A gas-refill approval explicitly authorizes the bounded sequence: ERC-20 approval if needed, Uniswap V3 USDT→WPOL swap, then unwrap only the newly received WPOL to native POL.
+- Financial transactions are **never** signed or broadcast by this service. It may create a short-lived proposal, but approval/execution belongs to the centralized Supabase control path and systemd forces broadcast off.
 - If native POL falls below the emergency floor, the engine refuses the swap because a swap cannot bootstrap its own gas.
 - `.env` is not committed. Production secrets live in `/etc/osa-bounty-hunter.env` mode `0600`.
 
@@ -28,8 +28,8 @@ sudo journalctl -u osa-bounty-hunter.service -f
 
 Set these in `/etc/osa-bounty-hunter.env` only:
 
-- `GITHUB_TOKEN`: fine-grained token with read access to public repo metadata/content and **Issues: write** for `/attempt` comments.
-- `OPENAI_API_KEY`: for scoring and candidate patch generation.
+- `GITHUB_TOKEN`: optional while `AUTO_ATTEMPT=false`; required with Issues write permission only for explicitly enabled `/attempt` comments.
+- `OPENAI_API_KEY`: optional when the OSA AI router/Gemini is configured; either path can score and prepare candidates.
 - `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`: optional but recommended.
 - `PRIVATE_KEY`: optional signer; leave blank for monitor/proposal-only mode. Never paste a seed phrase.
 - `WALLET_ADDRESS`: signer wallet address; if `PRIVATE_KEY` is present the program verifies they match.
@@ -47,13 +47,6 @@ sudo -u osa-bounty env -i \
 # Safe configuration and balance diagnostic (no signing)
 sudo systemctl restart osa-bounty-hunter.service
 sudo journalctl -u osa-bounty-hunter.service -n 100 --no-pager
-
-# Explicitly approve one fresh financial proposal
-sudo -u osa-bounty /opt/osa-bounty-hunter/.venv/bin/python \
-  /opt/osa-bounty-hunter/bounty_hunter.py approve <proposal-id>
-
-# Process an approved financial proposal immediately
-sudo systemctl restart osa-bounty-hunter.service
 
 # Disable
 sudo systemctl disable --now osa-bounty-hunter.service

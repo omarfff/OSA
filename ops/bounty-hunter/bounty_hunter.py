@@ -159,7 +159,7 @@ class Settings:
     max_active_attempts: int = field(default_factory=lambda: env_int("MAX_ACTIVE_ATTEMPTS", 2))
     attempt_ttl_hours: int = field(default_factory=lambda: env_int("ATTEMPT_TTL_HOURS", 96))
     max_existing_attempts: int = field(default_factory=lambda: env_int("MAX_EXISTING_ATTEMPTS", 4))
-    auto_attempt: bool = field(default_factory=lambda: env_bool("AUTO_ATTEMPT", True))
+    auto_attempt: bool = field(default_factory=lambda: env_bool("AUTO_ATTEMPT", False))
 
     openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", "").strip())
     openai_model: str = field(default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-5.6-terra"))
@@ -239,6 +239,12 @@ class StateStore:
                 status TEXT NOT NULL,
                 tx_hash TEXT
             );
+            CREATE TABLE IF NOT EXISTS preparations (
+                key TEXT PRIMARY KEY,
+                prepared_at TEXT NOT NULL,
+                evidence_json TEXT NOT NULL,
+                status TEXT NOT NULL
+            );
             """
         )
         self.db.commit()
@@ -277,6 +283,16 @@ class StateStore:
         self.db.execute(
             "INSERT OR REPLACE INTO attempts(key,attempted_at,comment_url,status) VALUES(?,?,?,'active')",
             (key, int(time.time()), comment_url),
+        )
+        self.db.commit()
+
+    def get_preparation(self, key: str) -> Optional[sqlite3.Row]:
+        return self.db.execute("SELECT * FROM preparations WHERE key=?", (key,)).fetchone()
+
+    def record_preparation(self, key: str, evidence: dict[str, Any], status: str) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO preparations(key,prepared_at,evidence_json,status) VALUES(?,?,?,?)",
+            (key, utcnow(), json.dumps(evidence), status),
         )
         self.db.commit()
 
@@ -1101,21 +1117,34 @@ class BountyHunter:
         self.store.upsert_bounty(b, score=score, status="analyzed")
         if not analysis.get("should_attempt") or score < self.s.ai_min_score:
             return
+        preparation = self.store.get_preparation(b.key)
+        prepared_and_tested = bool(preparation and preparation["status"] == "prepared_tested")
+        if preparation:
+            self.store.upsert_bounty(b, score=score, status=str(preparation["status"]))
+        if self.s.auto_prepare_fix and not preparation and (self.ai.client or self.ai.router):
+            try:
+                evidence = self.fixer.prepare(b, analysis.get("keywords", []))
+                passed = bool(evidence["tests"]) and all(x.get("ok") for x in evidence["tests"])
+                preparation_status = "prepared_tested" if passed else "prepared_needs_review"
+                self.store.record_preparation(b.key, evidence, preparation_status)
+                self.store.upsert_bounty(b, score=score, status=preparation_status)
+                prepared_and_tested = passed
+                self.notifier.send(f"🛠️ Fix prepared for {b.key}. Tests={'PASS' if passed else 'NEEDS_REVIEW'}\nWorkspace: {evidence['workspace']}")
+            except Exception as exc:
+                logging.exception("fix preparation failed for %s", b.key)
+                self.store.upsert_bounty(b, score=score, status="preparation_failed")
+                self.notifier.send(f"⚠️ Fix preparation failed for {b.key}: {type(exc).__name__}: {exc}")
         if not self.s.auto_attempt:
-            self.notifier.send(f"🎯 Candidate {b.key} ${b.reward_usd:.0f}, score {score}; AUTO_ATTEMPT=false")
+            state = "tested fix ready for owner review" if prepared_and_tested else "candidate requires review"
+            self.notifier.send(f"🎯 Candidate {b.key} ${b.reward_usd:.0f}, score {score}; {state}; external /attempt is human-gated")
+            return
+        if self.s.auto_prepare_fix and not prepared_and_tested:
+            self.notifier.send(f"⛔ No /attempt posted for {b.key}: a tested preparation is required")
             return
         comment_url = self.github.post_attempt(b, analysis.get("plan") or ["Review and implement the smallest tested fix"])
         self.store.record_attempt(b.key, comment_url)
         self.store.upsert_bounty(b, score=score, status="attempted")
         self.notifier.send(f"🎯 Attempted {b.key} (${b.reward_usd:.0f}, score {score})\n{comment_url}")
-        if self.s.auto_prepare_fix and self.s.openai_api_key:
-            try:
-                evidence = self.fixer.prepare(b, analysis.get("keywords", []))
-                passed = bool(evidence["tests"]) and all(x.get("ok") for x in evidence["tests"])
-                self.notifier.send(f"🛠️ Fix prepared for {b.key}. Tests={'PASS' if passed else 'NEEDS_REVIEW'}\nWorkspace: {evidence['workspace']}")
-            except Exception as exc:
-                logging.exception("fix preparation failed for %s", b.key)
-                self.notifier.send(f"⚠️ Fix preparation failed for {b.key}: {type(exc).__name__}: {exc}")
 
     def cycle(self) -> None:
         for bounty in self.discover():

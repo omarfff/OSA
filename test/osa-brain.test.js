@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { askBrain, createBrainServer, knowledgeStatus, retrieveKnowledge, systemPrompt, validateLoopbackUrl } from '../tools/osa-brain.mjs';
+import { askBrain, createBrainServer, knowledgeStatus, researchWithGemini, retrieveKnowledge, systemPrompt, validateLoopbackUrl } from '../tools/osa-brain.mjs';
 
 test('brain only accepts loopback Ollama URLs', () => {
   assert.equal(validateLoopbackUrl('http://127.0.0.1:11434').hostname, '127.0.0.1');
@@ -133,4 +133,40 @@ test('brain inference timeout is configurable and bounded for local CPU continui
   assert.match(source, /OSA_BRAIN_INFER_TIMEOUT_MS/);
   assert.match(source, /Math\.max\(10000, Math\.min/);
   assert.match(source, /AbortSignal\.timeout\(DEFAULT_INFER_TIMEOUT_MS\)/);
+});
+
+test('Gemini research uses Google Search grounding and returns bounded source evidence', async () => {
+  let seenUrl; let seen;
+  const fakeFetch = async (url, options) => {
+    seenUrl = String(url); seen = options;
+    return { ok: true, json: async () => ({
+      candidates: [{
+        content: { parts: [{ text: 'One verified open task.' }] },
+        groundingMetadata: {
+          webSearchQueries: ['open paid coding bounty'],
+          groundingChunks: [
+            { web: { uri: 'https://github.com/acme/widget/issues/7', title: 'Issue 7' } },
+            { web: { uri: 'javascript:alert(1)', title: 'bad' } },
+          ],
+        },
+      }],
+      usageMetadata: { totalTokenCount: 42 },
+    }) };
+  };
+  const result = await researchWithGemini({
+    query: 'Find open paid coding work', fetchImpl: fakeFetch,
+    env: { OSA_GEMINI_API_KEY: 'test-key', OSA_GEMINI_MODEL: 'gemini-3.8-flash' },
+  });
+  const request = JSON.parse(seen.body);
+  assert.equal(seen.headers['x-goog-api-key'], 'test-key');
+  assert.doesNotMatch(seenUrl, /test-key/);
+  assert.deepEqual(request.tools, [{ google_search: {} }]);
+  assert.equal(result.provider, 'gemini_google_search');
+  assert.equal(result.grounded, true);
+  assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0].url, 'https://github.com/acme/widget/issues/7');
+});
+
+test('Gemini research fails closed without a configured key', async () => {
+  await assert.rejects(() => researchWithGemini({ query: 'paid task', env: {} }), /gemini_research_not_configured/);
 });

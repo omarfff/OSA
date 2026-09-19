@@ -68,16 +68,13 @@ install -o root -g root -m 0644 "$SERVICE_SRC" "$SERVICE_DST"
 systemd-analyze verify "$SERVICE_DST"
 systemctl daemon-reload
 
-# Do not create a restart loop from an unconfigured template. GitHub read/write
-# automation requires a token; financial broadcast stays disabled in systemd.
-if grep -Eq '^GITHUB_TOKEN=.+$' "$ENV_FILE"; then
-  systemctl enable --now osa-bounty-hunter.service
-  sleep 2
-  systemctl --no-pager --full status osa-bounty-hunter.service || true
-else
-  systemctl disable --now osa-bounty-hunter.service >/dev/null 2>&1 || true
-  echo "Installed but not enabled: set GITHUB_TOKEN in $ENV_FILE." >&2
-fi
+# Public Algora discovery and prepare-first analysis do not require a GitHub
+# write token. AUTO_ATTEMPT defaults to false; a token is required only if an
+# operator explicitly enables external /attempt posting.
+systemctl enable osa-bounty-hunter.service >/dev/null
+systemctl restart osa-bounty-hunter.service
+sleep 2
+systemctl --no-pager --full status osa-bounty-hunter.service || true
 
 echo
 echo "Installed. Configure secrets only in: $ENV_FILE"
