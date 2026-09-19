@@ -1,0 +1,31 @@
+name: OSA Real Estate Hunter Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ops/real-estate-probe-trigger.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read latest hunter output through Supabase control plane
+        shell: bash
+        env:
+          PROBE_URL: https://jpnlmpqqtiwisxcsjwbm.supabase.co/functions/v1/osa-re-hunter-read-once
+        run: |
+          set -euo pipefail
+          OIDC_TOKEN="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=osa-re-hunter-probe" | jq -r '.value')"
+          test -n "$OIDC_TOKEN"
+          RESP="$(mktemp)"
+          HTTP="$(curl -sS -o "$RESP" -w '%{http_code}' -X POST -H "Authorization: Bearer $OIDC_TOKEN" -H 'Content-Type: application/json' --data '{}' "$PROBE_URL" || true)"
+          echo "HTTP=$HTTP"
+          cat "$RESP"
+          echo
+          [[ "$HTTP" =~ ^2[0-9][0-9]$ ]]
