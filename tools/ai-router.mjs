@@ -11,8 +11,11 @@ function outputLimit(env, fallback = 400) {
 }
 
 function parseOrder(raw) {
-  const allowed = new Set(['ollama', 'openai_compatible', 'gemini']);
-  const order = String(raw || 'ollama,openai_compatible,gemini').split(',').map((x) => x.trim()).filter((x) => allowed.has(x));
+  const allowed = new Set(['ollama', 'anthropic', 'openai_compatible', 'gemini']);
+  const order = String(raw || 'ollama,anthropic,openai_compatible,gemini')
+    .split(',')
+    .map((x) => x.trim())
+    .filter((x) => allowed.has(x));
   return [...new Set(order.length ? order : ['ollama'])];
 }
 
@@ -37,6 +40,12 @@ export function providerStatus(env = process.env) {
       configured: Boolean(env.OSA_OLLAMA_URL || env.OSA_BRAIN_MODEL || true),
       model: clean(env.OSA_BRAIN_MODEL || 'qwen3.5:0.8b', 200),
       endpoint: clean(env.OSA_OLLAMA_URL || 'http://127.0.0.1:11434', 300),
+    },
+    anthropic: {
+      configured: Boolean(env.OSA_ANTHROPIC_API_KEY),
+      model: clean(env.OSA_ANTHROPIC_MODEL || 'claude-sonnet-5', 200),
+      endpoint: 'https://api.anthropic.com/v1/messages',
+      api_key_present: Boolean(env.OSA_ANTHROPIC_API_KEY),
     },
     openai_compatible: {
       configured: Boolean(env.OSA_AI_REMOTE_URL && env.OSA_AI_REMOTE_MODEL && env.OSA_AI_REMOTE_API_KEY),
@@ -68,6 +77,51 @@ async function callOllama({ messages, fetchImpl, env, signal }) {
   const text = clean(payload?.message?.content || '', 12000);
   if (!text) throw new Error('ollama_empty_response');
   return { provider: 'ollama', model, text };
+}
+
+async function callAnthropic({ messages, fetchImpl, env, signal }) {
+  if (!env.OSA_ANTHROPIC_API_KEY) throw new Error('anthropic_not_configured');
+  const model = clean(env.OSA_ANTHROPIC_MODEL || 'claude-sonnet-5', 200);
+  const system = messages
+    .filter((m) => m.role === 'system')
+    .map((m) => clean(m.content, 8000))
+    .filter(Boolean)
+    .join('\n\n');
+  const anthropicMessages = messages
+    .filter((m) => m.role !== 'system')
+    .map((m) => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: clean(m.content, 12000),
+    }))
+    .filter((m) => m.content);
+  if (!anthropicMessages.length) throw new Error('anthropic_messages_required');
+
+  const body = {
+    model,
+    max_tokens: outputLimit(env, 400),
+    temperature: 0.15,
+    messages: anthropicMessages,
+  };
+  if (system) body.system = system;
+
+  const response = await fetchImpl('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': env.OSA_ANTHROPIC_API_KEY,
+    },
+    signal,
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`anthropic_http_${response.status}`);
+  const payload = await response.json();
+  const text = clean(
+    Array.isArray(payload?.content) ? payload.content.map((part) => part?.text || '').filter(Boolean).join('\n') : '',
+    12000,
+  );
+  if (!text) throw new Error('anthropic_empty_response');
+  return { provider: 'anthropic', model, text };
 }
 
 async function callOpenAICompatible({ messages, fetchImpl, env, signal }) {
@@ -118,18 +172,32 @@ async function callGemini({ messages, fetchImpl, env, signal }) {
 
 export async function routeChat({ messages, fetchImpl = fetch, env = process.env, timeoutMs = 60000 } = {}) {
   if (!Array.isArray(messages) || !messages.length) throw new Error('messages_required');
-  const normalized = messages.slice(-20).map((m) => ({ role: ['system', 'user', 'assistant'].includes(m?.role) ? m.role : 'user', content: clean(m?.content, 12000) })).filter((m) => m.content);
+  const normalized = messages
+    .slice(-20)
+    .map((m) => ({
+      role: ['system', 'user', 'assistant'].includes(m?.role) ? m.role : 'user',
+      content: clean(m?.content, 12000),
+    }))
+    .filter((m) => m.content);
   if (!normalized.length) throw new Error('nonempty_messages_required');
+
   const status = providerStatus(env);
   const failures = [];
   for (const provider of status.order) {
     const configured = status.providers[provider]?.configured;
-    if (!configured) { failures.push({ provider, error: 'not_configured' }); continue; }
+    if (!configured) {
+      failures.push({ provider, error: 'not_configured' });
+      continue;
+    }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error('ai_provider_timeout')), Math.max(1000, Math.min(Number(timeoutMs) || 60000, 180000)));
+    const timer = setTimeout(
+      () => controller.abort(new Error('ai_provider_timeout')),
+      Math.max(1000, Math.min(Number(timeoutMs) || 60000, 180000)),
+    );
     try {
       let result;
       if (provider === 'ollama') result = await callOllama({ messages: normalized, fetchImpl, env, signal: controller.signal });
+      else if (provider === 'anthropic') result = await callAnthropic({ messages: normalized, fetchImpl, env, signal: controller.signal });
       else if (provider === 'openai_compatible') result = await callOpenAICompatible({ messages: normalized, fetchImpl, env, signal: controller.signal });
       else result = await callGemini({ messages: normalized, fetchImpl, env, signal: controller.signal });
       clearTimeout(timer);
@@ -151,10 +219,12 @@ async function main() {
   if (cmd === 'ask') {
     const prompt = clean(rest.join(' '), 12000);
     if (!prompt) throw new Error('prompt_required');
-    const result = await routeChat({ messages: [
-      { role: 'system', content: 'You are an OSA support model. Be concise, factual, and never invent runtime state, payments, credentials, or completed actions.' },
-      { role: 'user', content: prompt },
-    ] });
+    const result = await routeChat({
+      messages: [
+        { role: 'system', content: 'You are an OSA support model. Be concise, factual, and never invent runtime state, payments, credentials, or completed actions.' },
+        { role: 'user', content: prompt },
+      ],
+    });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
     return;
