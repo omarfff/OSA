@@ -12,7 +12,7 @@ test('CEO auto-execution excludes argumented, write and financial agents', () =>
     { id: 'money', args: 'none', enabled: true, access: 'financial' },
   ];
   const plan = executableSafePlan('NEAR Agent Market cross-owner paid settlement', agents);
-  assert.deepEqual(plan.map((x) => x.id), ['near-market-scout', 'near-listing-spec', 'payment-watch']);
+  assert.deepEqual(plan.map((x) => x.id), ['near-market-scout', 'near-listing-spec']);
 });
 
 test('CEO cycle executes safe planned agents and grounds a CEO decision', async () => {
@@ -29,7 +29,7 @@ test('CEO cycle executes safe planned agents and grounds a CEO decision', async 
       return { text: 'Decision: continue bounded NEAR experiment', mode: 'ceo', model: 'test' };
     },
   });
-  assert.deepEqual(seen, ['near-market-scout', 'near-listing-spec', 'payment-watch']);
+  assert.deepEqual(seen, ['near-market-scout', 'near-listing-spec']);
   assert.equal(result.ok, true);
   assert.match(result.primary_path, /NEAR Agent Market/);
 });
