@@ -28,6 +28,23 @@ test('askBrain sends bounded local inference request', async () => {
   assert.match(seen.messages[1].content, /PERSISTENT OSA MEMORY/);
 });
 
+test('explicitly named canonical memory files are pinned before generic relevance matches', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'osa-kb-pin-'));
+  try {
+    await fsp.writeFile(path.join(dir, '01-master.md'), '# Master\nRevenue truth is settlement-only and buyer-before-building is mandatory.');
+    await fsp.writeFile(path.join(dir, '02-retrospective.md'), '# Retrospective\nExecution volume is not business progress; planned sources are not live.');
+    await fsp.writeFile(path.join(dir, '99-noisy.md'), '# Revenue settlement buyer automation\nRevenue settlement buyer automation '.repeat(80));
+    const hit = await retrieveKnowledge(
+      'Use 01-master.md and 02-retrospective.md before revenue settlement buyer automation decisions',
+      { knowledgeDir: dir, topK: 3, maxChars: 5000 },
+    );
+    assert.ok(hit.sources.includes('01-master.md'));
+    assert.ok(hit.sources.includes('02-retrospective.md'));
+    assert.equal(hit.sources[0], '01-master.md');
+    assert.equal(hit.sources[1], '02-retrospective.md');
+  } finally { await fsp.rm(dir, { recursive: true, force: true }); }
+});
+
 test('persistent knowledge retrieves relevant OSA memory', async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'osa-kb-'));
   try {

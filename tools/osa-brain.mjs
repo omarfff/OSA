@@ -44,7 +44,7 @@ function splitKnowledgeFile(file, text) {
         cut = para > 500 ? para : sentence > 500 ? sentence + 1 : cut;
       }
       const body = rest.slice(0, cut).trim();
-      if (body) chunks.push({ file, heading, body, terms: terms(`${heading} ${body}`) });
+      if (body) chunks.push({ file, heading, body, terms: terms(`${file} ${heading} ${body}`) });
       rest = rest.slice(cut).trim();
     }
   }
@@ -78,11 +78,22 @@ export async function retrieveKnowledge(query, { knowledgeDir = DEFAULT_KNOWLEDG
     for (const t of q) if (heading.includes(t)) score += 2;
     return { ...chunk, score };
   }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score || a.file.localeCompare(b.file));
+  const requestedFiles = db.files.filter((file) => String(query || '').toLowerCase().includes(file.toLowerCase()));
   const chosen = []; let used = 0;
-  for (const item of scored.slice(0, Math.max(1, Number(topK) || 6) * 2)) {
+  const add = (item) => {
+    if (!item || chosen.some((x) => x.file === item.file && x.heading === item.heading && x.body === item.body)) return false;
     const rendered = `[${item.file} :: ${item.heading}]\n${item.body}`;
-    if (chosen.length && used + rendered.length > maxChars) continue;
+    if (chosen.length && used + rendered.length > maxChars) return false;
     chosen.push({ ...item, rendered }); used += rendered.length;
+    return true;
+  };
+  for (const file of requestedFiles) {
+    const item = scored.find((x) => x.file === file) || db.chunks.find((x) => x.file === file);
+    add(item);
+    if (chosen.length >= topK || used >= maxChars) break;
+  }
+  for (const item of scored.slice(0, Math.max(1, Number(topK) || 6) * 3)) {
+    add(item);
     if (chosen.length >= topK || used >= maxChars) break;
   }
   return { text: chosen.map((x) => x.rendered).join('\n\n'), sources: [...new Set(chosen.map((x) => x.file))], chunks: db.chunks.length };
