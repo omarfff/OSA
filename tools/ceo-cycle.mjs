@@ -65,31 +65,94 @@ function compactAgentResult(agentId, result) {
   }
 }
 
+export function deterministicCeoDecision(runtime = {}) {
+  const rows = Array.isArray(runtime?.safe_executions) ? runtime.safe_executions : [];
+  const market = rows.find((x) => x?.agent === 'near-market-scout');
+  const listing = rows.find((x) => x?.agent === 'near-listing-spec');
+  const stats = market?.evidence?.platform_stats || {};
+  const truth = listing?.evidence?.commercial_truth || {};
+  const marketActive = Boolean(
+    market?.ok
+    && Number(stats.jobs_this_week || 0) > 0
+    && Number(stats.delivered_jobs || 0) > 0
+    && Number(stats.active_hires || 0) > 0
+  );
+  const productBuilt = Boolean(listing?.ok && truth.current_state === 'BUILT');
+
+  let stage = 'BLOCKED';
+  let nextAction = 'Repair the smallest failed prerequisite and rerun the bounded CEO cycle.';
+  let stopReason = null;
+  if (marketActive && productBuilt) {
+    stage = 'VERIFIED';
+    nextAction = 'Advance the existing Public MCP Preflight & Evidence product to an external NEAR listing/application using an already-authorized session if one exists; otherwise stop exactly at the account/binding-terms owner gate.';
+  } else if (!marketActive) {
+    stopReason = 'Current runtime evidence does not establish an active NEAR market.';
+  } else if (!productBuilt) {
+    stopReason = 'The listing specification did not verify as BUILT.';
+  }
+
+  return {
+    decision_source: 'deterministic_kernel',
+    stage,
+    primary_path: 'NEAR Agent Market -> Public MCP Preflight & Evidence -> verified cross-owner paid settlement',
+    market_active: marketActive,
+    product_built: productBuilt,
+    next_action: nextAction,
+    park: [
+      'new generalist agents',
+      'new payment rails',
+      'self-hires and internal test jobs',
+      'infrastructure unrelated to a named listing/delivery/settlement blocker',
+    ],
+    owner_only_gate: 'identity/KYC, binding terms/e-signature, custody/funding, private-key ownership, money movement or another irreversible financial/legal action',
+    stop_reason: stopReason,
+    paid: false,
+    paid_truth: 'PAID remains false until authoritative external settlement evidence exists.',
+  };
+}
+
 export async function routedCeoDecision({ goal, runtime, env = process.env, routeChatImpl = routeChat } = {}) {
-  const query = `${goal}\n${JSON.stringify(runtime)}`;
+  const kernel = deterministicCeoDecision(runtime);
+  const query = `${goal}\n${JSON.stringify({ kernel, runtime })}`;
   const [memory, experience] = await Promise.all([
-    retrieveKnowledge(query, { topK: 5, maxChars: 4800 }),
-    retrieveExperiences(query, { topK: 4, maxChars: 2200 }),
+    retrieveKnowledge(query, { topK: 5, maxChars: 4200 }),
+    retrieveExperiences(query, { topK: 4, maxChars: 1800 }),
   ]);
   const routedEnv = {
     ...env,
-    OSA_AI_PROVIDER_ORDER: env.OSA_CEO_AI_PROVIDER_ORDER || 'gemini,ollama,anthropic,openai_compatible',
-    OSA_AI_MAX_OUTPUT_TOKENS: env.OSA_CEO_MAX_OUTPUT_TOKENS || '280',
+    OSA_AI_PROVIDER_ORDER: env.OSA_CEO_AI_PROVIDER_ORDER || 'gemini,anthropic,openai_compatible',
+    OSA_AI_MAX_OUTPUT_TOKENS: env.OSA_CEO_MAX_OUTPUT_TOKENS || '220',
   };
-  const result = await routeChatImpl({
-    env: routedEnv,
-    timeoutMs: 60000,
-    messages: [
-      { role: 'system', content: systemPrompt('ceo') },
-      { role: 'user', content: `GOAL:\n${goal}\n\nPERSISTENT OSA MEMORY:\n${memory.text || '(none)'}\n\nVERIFIED EXPERIENCE MEMORY:\n${experience.text || '(none)'}\n\nVERIFIED RUNTIME EVIDENCE:\n${JSON.stringify(runtime)}` },
-    ],
-  });
-  if (!result?.ok || !result?.text) throw new Error(result?.error || 'ceo_router_failed');
+  let advisory = null;
+  try {
+    const result = await routeChatImpl({
+      env: routedEnv,
+      timeoutMs: 15000,
+      messages: [
+        { role: 'system', content: systemPrompt('ceo') },
+        { role: 'user', content: `The deterministic CEO kernel is authoritative for stage/gates. Explain or challenge it only with supplied evidence; do not invent actions.\n\nGOAL:\n${goal}\n\nKERNEL:\n${JSON.stringify(kernel)}\n\nPERSISTENT OSA MEMORY:\n${memory.text || '(none)'}\n\nVERIFIED EXPERIENCE MEMORY:\n${experience.text || '(none)'}\n\nVERIFIED RUNTIME EVIDENCE:\n${JSON.stringify(runtime)}` },
+      ],
+    });
+    if (result?.ok && result?.text) {
+      advisory = {
+        text: result.text,
+        provider: result.provider,
+        model: result.model,
+        failures: result.failures || [],
+      };
+    } else {
+      advisory = { text: null, provider: null, model: null, failures: result?.failures || [], error: result?.error || 'ceo_router_failed' };
+    }
+  } catch (err) {
+    advisory = { text: null, provider: null, model: null, failures: [], error: String(err?.message || err) };
+  }
   return {
-    text: result.text,
-    provider: result.provider,
-    model: result.model,
-    failures: result.failures || [],
+    ...kernel,
+    text: advisory?.text || `Decision: ${kernel.next_action}\nStage: ${kernel.stage}\nPaid: false. ${kernel.paid_truth}`,
+    provider: advisory?.provider || null,
+    model: advisory?.model || null,
+    advisory_failures: advisory?.failures || [],
+    advisory_error: advisory?.error || null,
     memory_sources: memory.sources || [],
     experience_sources: experience.sources || [],
   };
