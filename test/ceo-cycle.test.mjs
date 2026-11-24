@@ -23,10 +23,9 @@ test('CEO cycle executes safe planned agents and grounds a CEO decision', async 
       seen.push(agent.id);
       return { ok: true, agent: agent.id, stdout: JSON.stringify({ ok: true, agent: agent.id }) };
     },
-    askBrainImpl: async ({ mode, context }) => {
-      assert.equal(mode, 'ceo');
-      assert.equal(context.revenue_truth, 'Only authoritative external settlement counts as PAID.');
-      return { text: 'Decision: continue bounded NEAR experiment', mode: 'ceo', model: 'test' };
+    decisionImpl: async ({ runtime }) => {
+      assert.equal(runtime.revenue_truth, 'Only authoritative external settlement counts as PAID.');
+      return { text: 'Decision: continue bounded NEAR experiment', provider: 'test', model: 'test' };
     },
   });
   assert.deepEqual(seen, ['near-market-scout', 'near-listing-spec']);
