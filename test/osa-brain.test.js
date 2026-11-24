@@ -83,6 +83,15 @@ test('repository knowledge pack has coverage and no obvious credential material'
   assert.match(hit.text, /GitOps/);
 });
 
+test('brain installer preserves canonical runtime memory overlays across deploys', () => {
+  const installer = fs.readFileSync('ops/install-brain.sh', 'utf8');
+  assert.match(installer, /01-osa-unified-master-record\.md/);
+  assert.match(installer, /02-external-world-retrospective-2026-11-24\.md/);
+  assert.match(installer, /PRESERVE_DIR=\$\(mktemp -d\)/);
+  assert.match(installer, /cp -a "\$KNOWLEDGE_DIR\/\$name" "\$PRESERVE_DIR\/\$name"/);
+  assert.match(installer, /install -o root -g osa-brain -m 0640 "\$PRESERVE_DIR\/\$name" "\$KNOWLEDGE_DIR\/\$name"/);
+});
+
 test('brain installer restarts an already-running service after updating runtime or memory', () => {
   const installer = fs.readFileSync('ops/install-brain.sh', 'utf8');
   assert.match(installer, /systemctl restart osa-brain\.service/);
