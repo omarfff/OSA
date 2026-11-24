@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
 import { loadFabric, planForGoal, runAgent } from './agent-fabric.mjs';
-import { askBrain } from './osa-brain.mjs';
+import { retrieveExperiences, retrieveKnowledge, systemPrompt } from './osa-brain.mjs';
+import { routeChat } from './ai-router.mjs';
 
 const DEFAULT_GOAL = 'Reach the first verified cross-owner paid settlement through NEAR Agent Market using the existing Public MCP Preflight & Evidence capability. Do not create new platforms, move funds, accept binding terms, perform KYC, or claim revenue without settlement evidence.';
 
@@ -64,11 +65,41 @@ function compactAgentResult(agentId, result) {
   }
 }
 
+export async function routedCeoDecision({ goal, runtime, env = process.env, routeChatImpl = routeChat } = {}) {
+  const query = `${goal}\n${JSON.stringify(runtime)}`;
+  const [memory, experience] = await Promise.all([
+    retrieveKnowledge(query, { topK: 5, maxChars: 4800 }),
+    retrieveExperiences(query, { topK: 4, maxChars: 2200 }),
+  ]);
+  const routedEnv = {
+    ...env,
+    OSA_AI_PROVIDER_ORDER: env.OSA_CEO_AI_PROVIDER_ORDER || 'gemini,ollama,anthropic,openai_compatible',
+    OSA_AI_MAX_OUTPUT_TOKENS: env.OSA_CEO_MAX_OUTPUT_TOKENS || '280',
+  };
+  const result = await routeChatImpl({
+    env: routedEnv,
+    timeoutMs: 60000,
+    messages: [
+      { role: 'system', content: systemPrompt('ceo') },
+      { role: 'user', content: `GOAL:\n${goal}\n\nPERSISTENT OSA MEMORY:\n${memory.text || '(none)'}\n\nVERIFIED EXPERIENCE MEMORY:\n${experience.text || '(none)'}\n\nVERIFIED RUNTIME EVIDENCE:\n${JSON.stringify(runtime)}` },
+    ],
+  });
+  if (!result?.ok || !result?.text) throw new Error(result?.error || 'ceo_router_failed');
+  return {
+    text: result.text,
+    provider: result.provider,
+    model: result.model,
+    failures: result.failures || [],
+    memory_sources: memory.sources || [],
+    experience_sources: experience.sources || [],
+  };
+}
+
 export async function runCeoCycle({
   goal = DEFAULT_GOAL,
   env = process.env,
   runAgentImpl = runAgent,
-  askBrainImpl = askBrain,
+  decisionImpl = routedCeoDecision,
 } = {}) {
   const fabric = await loadFabric();
   const safePlan = executableSafePlan(goal, fabric.agents).slice(0, 4);
@@ -101,25 +132,12 @@ export async function runCeoCycle({
 
   let decision;
   try {
-    decision = await askBrainImpl({
-      task: [
-        'Act as OSA CEO for one revenue cycle.',
-        'Use the supplied verified runtime evidence and persistent OSA memory.',
-        'Keep one primary revenue path and at most one backup.',
-        'Prefer the existing Public MCP Preflight & Evidence asset over new product building.',
-        'Separate BUILT, VERIFIED, SELLING and PAID.',
-        'Exclude self-hires, internal/QA activity and test transactions from external demand.',
-        'Choose the smallest next action that advances a verified cross-owner paid settlement.',
-        'Do not authorize owner-only gates.',
-      ].join(' '),
-      context: runtime,
-      mode: 'ceo',
-    });
+    decision = await decisionImpl({ goal, runtime, env });
   } catch (err) {
     decision = {
-      text: 'CEO inference unavailable. Preserve the primary path: verify NEAR market activity, generate the MCP listing spec, keep payment watch active, and stop at any owner-only legal/identity/financial gate.',
+      text: 'CEO inference unavailable. Preserve the primary path: verify NEAR market activity, generate the MCP listing spec, and stop at any owner-only legal/identity/financial gate.',
+      provider: null,
       model: null,
-      mode: 'ceo',
       error: String(err?.message || err),
     };
   }
