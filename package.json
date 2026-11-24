@@ -24,7 +24,7 @@
     "real-estate:hunt": "node tools/real-estate-hunter.mjs",
     "near:radar": "node tools/near-market-radar.mjs",
     "near:listing": "node tools/near-listing-spec.mjs",
-    "ceo:cycle": "node tools/ceo-cycle.mjs"
+    "ceo:cycle": "bash ops/ceo-cycle-with-brain-env.sh"
   },
   "engines": {
     "node": ">=20"

@@ -124,7 +124,6 @@ export function planForGoal(goal, agents) {
   if (/\bnear\b|agent market|mcp\/api preflight|cross-owner|وكيل.*سوق|سوق.*وكيل/.test(text)) {
     add('near-market-scout', 'verify current NEAR Agent Market demand before listing or building');
     add('near-listing-spec', 'reuse the existing MCP preflight capability as a narrow sellable listing');
-    add('payment-watch', 'preserve settlement truth while the experiment advances');
   }
   if (/revenue|sales|lead|money|cash|عميل|دخل|فلوس|ايراد|إيراد/.test(text)) {
     add('revenue-scout', 'find current demand before building');
