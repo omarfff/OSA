@@ -21,7 +21,10 @@
     "ai:ask": "node tools/ai-router.mjs ask",
     "car:hunt": "node tools/car-hunter.mjs",
     "car:autopilot": "node tools/car-hunter-autopilot.mjs",
-    "real-estate:hunt": "node tools/real-estate-hunter.mjs"
+    "real-estate:hunt": "node tools/real-estate-hunter.mjs",
+    "near:radar": "node tools/near-market-radar.mjs",
+    "near:listing": "node tools/near-listing-spec.mjs",
+    "ceo:cycle": "node tools/ceo-cycle.mjs"
   },
   "engines": {
     "node": ">=20"
