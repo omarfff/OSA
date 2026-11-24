@@ -213,7 +213,7 @@ export async function askBrain({ task, context = {}, mode = 'operator', fetchImp
   const base = validateLoopbackUrl(ollamaUrl);
   const endpoint = new URL('/api/chat', base);
   const grounding = `TASK:\n${cleanTask}\n\nPERSISTENT OSA MEMORY:\n${memory.text || '(none)'}\n\nVERIFIED EXPERIENCE MEMORY:\n${experience.text || '(none)'}\n\nVERIFIED/RUNTIME CONTEXT:\n${runtimeContext}`;
-  const infer = async (messages, numPredict = cleanMode === 'media' ? 180 : cleanMode === 'ceo' ? 320 : 220) => {
+  const infer = async (messages, numPredict = cleanMode === 'media' ? 180 : cleanMode === 'ceo' ? 240 : 220) => {
     const response = await fetchImpl(endpoint, {
       method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(DEFAULT_INFER_TIMEOUT_MS),
       body: JSON.stringify({ model, stream: false, think: false, options: { num_predict: numPredict, temperature: cleanMode === 'sales' ? 0.35 : 0.15, num_ctx: 4096 }, messages }),
