@@ -11,9 +11,23 @@ chmod 0600 /var/lib/osa-brain/experiences.jsonl
 install -d -o root -g root -m 0755 /usr/local/lib/osa
 install -m 0644 "$ROOT/tools/osa-brain.mjs" /usr/local/lib/osa/osa-brain.mjs
 install -m 0644 "$ROOT/tools/osa-brain-learn.mjs" /usr/local/lib/osa/osa-brain-learn.mjs
-install -d -o root -g osa-brain -m 0750 /usr/local/share/osa-brain/knowledge
-rm -f /usr/local/share/osa-brain/knowledge/*.md
-install -o root -g osa-brain -m 0640 "$ROOT"/knowledge/*.md /usr/local/share/osa-brain/knowledge/
+KNOWLEDGE_DIR=/usr/local/share/osa-brain/knowledge
+install -d -o root -g osa-brain -m 0750 "$KNOWLEDGE_DIR"
+PERSISTENT_MEMORY_FILES=(
+  01-osa-unified-master-record.md
+  02-external-world-retrospective-2026-11-24.md
+)
+PRESERVE_DIR=$(mktemp -d)
+cleanup_preserve() { rm -rf "$PRESERVE_DIR"; }
+trap cleanup_preserve EXIT
+for name in "${PERSISTENT_MEMORY_FILES[@]}"; do
+  [ -f "$KNOWLEDGE_DIR/$name" ] && cp -a "$KNOWLEDGE_DIR/$name" "$PRESERVE_DIR/$name"
+done
+rm -f "$KNOWLEDGE_DIR"/*.md
+install -o root -g osa-brain -m 0640 "$ROOT"/knowledge/*.md "$KNOWLEDGE_DIR"/
+for name in "${PERSISTENT_MEMORY_FILES[@]}"; do
+  [ -f "$PRESERVE_DIR/$name" ] && install -o root -g osa-brain -m 0640 "$PRESERVE_DIR/$name" "$KNOWLEDGE_DIR/$name"
+done
 install -d -o root -g osa-brain -m 0750 /etc/osa
 if [ ! -f /etc/osa/brain.env ]; then
   cat >/etc/osa/brain.env <<'ENV'
