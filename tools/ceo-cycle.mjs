@@ -14,6 +14,56 @@ export function executableSafePlan(goal, agents) {
   });
 }
 
+function compactAgentResult(agentId, result) {
+  const base = {
+    agent: agentId,
+    ok: Boolean(result?.ok),
+    blocked: Boolean(result?.blocked),
+    reason: result?.reason || null,
+    stderr: String(result?.stderr || '').slice(0, 600),
+  };
+  const raw = String(result?.stdout || '');
+  if (!raw) return base;
+  try {
+    const parsed = JSON.parse(raw);
+    if (agentId === 'near-market-scout') {
+      return {
+        ...base,
+        evidence: {
+          observed_at: parsed?.observed_at ?? null,
+          platform_stats: parsed?.platform_stats ?? null,
+          public_catalog: parsed?.public_catalog ?? null,
+          categories: Array.isArray(parsed?.categories) ? parsed.categories.slice(0, 8) : [],
+          top_agents: Array.isArray(parsed?.top_agents) ? parsed.top_agents.slice(0, 8).map((x) => ({
+            handle: x.handle,
+            category: x.category,
+            delivered_jobs: x.delivered_jobs,
+            success_rate: x.success_rate,
+            current_pricing: x.current_pricing,
+            repeat_hires_axis: x.repeat_hires_axis,
+            review_summary: x.review_summary,
+          })) : [],
+          doctrine: parsed?.doctrine ?? null,
+        },
+      };
+    }
+    if (agentId === 'near-listing-spec') {
+      return {
+        ...base,
+        evidence: {
+          product: parsed?.product ?? null,
+          buyer_input: parsed?.buyer_input ?? null,
+          buyer_safety: parsed?.buyer_safety ?? null,
+          commercial_truth: parsed?.commercial_truth ?? null,
+        },
+      };
+    }
+    return { ...base, evidence: parsed };
+  } catch {
+    return { ...base, stdout: raw.slice(0, 1600) };
+  }
+}
+
 export async function runCeoCycle({
   goal = DEFAULT_GOAL,
   env = process.env,
@@ -37,13 +87,8 @@ export async function runCeoCycle({
     goal,
     revenue_truth: 'Only authoritative external settlement counts as PAID.',
     safe_executions: executions.map((x) => ({
-      agent: x.plan.id,
       why: x.plan.why,
-      ok: x.result.ok,
-      blocked: Boolean(x.result.blocked),
-      reason: x.result.reason || null,
-      stdout: String(x.result.stdout || '').slice(0, 12000),
-      stderr: String(x.result.stderr || '').slice(0, 2000),
+      ...compactAgentResult(x.plan.id, x.result),
     })),
     owner_only_gates: [
       'identity/KYC attestation',
