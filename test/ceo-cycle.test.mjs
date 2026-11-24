@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { executableSafePlan, runCeoCycle } from '../tools/ceo-cycle.mjs';
+import { deterministicCeoDecision, executableSafePlan, runCeoCycle } from '../tools/ceo-cycle.mjs';
 
 test('CEO auto-execution excludes argumented, write and financial agents', () => {
   const agents = [
@@ -31,4 +31,37 @@ test('CEO cycle executes safe planned agents and grounds a CEO decision', async 
   assert.deepEqual(seen, ['near-market-scout', 'near-listing-spec']);
   assert.equal(result.ok, true);
   assert.match(result.primary_path, /NEAR Agent Market/);
+});
+
+
+test('deterministic CEO kernel advances only when market and product are verified', () => {
+  const decision = deterministicCeoDecision({
+    safe_executions: [
+      { agent: 'near-market-scout', ok: true, evidence: { platform_stats: { jobs_this_week: 40, delivered_jobs: 820, active_hires: 624 } } },
+      { agent: 'near-listing-spec', ok: true, evidence: { commercial_truth: { current_state: 'BUILT' } } },
+    ],
+  });
+  assert.equal(decision.stage, 'VERIFIED');
+  assert.equal(decision.market_active, true);
+  assert.equal(decision.product_built, true);
+  assert.equal(decision.paid, false);
+  assert.match(decision.next_action, /external NEAR listing\/application/);
+});
+
+test('routed CEO decision remains usable when every advisory provider fails', async () => {
+  const { routedCeoDecision } = await import('../tools/ceo-cycle.mjs');
+  const decision = await routedCeoDecision({
+    goal: 'NEAR paid settlement',
+    runtime: {
+      safe_executions: [
+        { agent: 'near-market-scout', ok: true, evidence: { platform_stats: { jobs_this_week: 1, delivered_jobs: 1, active_hires: 1 } } },
+        { agent: 'near-listing-spec', ok: true, evidence: { commercial_truth: { current_state: 'BUILT' } } },
+      ],
+    },
+    routeChatImpl: async () => ({ ok: false, error: 'all_ai_providers_failed', failures: [{ provider: 'gemini', error: '503' }] }),
+  });
+  assert.equal(decision.stage, 'VERIFIED');
+  assert.equal(decision.provider, null);
+  assert.equal(decision.paid, false);
+  assert.match(decision.text, /external NEAR listing\/application/);
 });
