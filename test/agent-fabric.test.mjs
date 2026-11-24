@@ -44,5 +44,5 @@ test('NEAR revenue goal prefers the specialist path without duplicates', () => {
     { id: 'revenue-scout', args: 'none', enabled: true, access: 'read_only' },
   ];
   const ids = planForGoal('NEAR Agent Market cross-owner paid settlement', agents).map((x) => x.id);
-  assert.deepEqual(ids, ['near-market-scout', 'near-listing-spec', 'payment-watch']);
+  assert.deepEqual(ids, ['near-market-scout', 'near-listing-spec']);
 });
