@@ -14,7 +14,7 @@ const DEFAULT_INFER_TIMEOUT_MS = Math.max(10000, Math.min(Number(process.env.OSA
 const DEFAULT_RESEARCH_TIMEOUT_MS = Math.max(30000, Math.min(Number(process.env.OSA_BRAIN_RESEARCH_TIMEOUT_MS || 180000), 240000));
 const DEFAULT_RESEARCH_MODEL = process.env.OSA_GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const KNOWLEDGE_CHUNK_SIZE = 1200;
-const MODES = new Set(['operator', 'media', 'sales', 'diagnose']);
+const MODES = new Set(['operator', 'media', 'sales', 'diagnose', 'ceo']);
 let knowledgeCache = { dir: null, chunks: [], files: [], loadedAt: 0 };
 
 export function validateLoopbackUrl(raw) {
@@ -177,6 +177,7 @@ export function systemPrompt(mode = 'operator') {
   if (mode === 'media') return `${common} Write one concise spoken-English AI news narration, 65-105 words, factual, original, no headings, no markdown, no hype, and no facts beyond the context. End with one practical implication for AI agents, reliability, machine commerce, or payments.`;
   if (mode === 'sales') return `${common} Draft concise evidence-first B2B copy. Mention only observed evidence. No fake urgency, bulk-spam language, guarantees, or invented metrics. Plain text only.`;
   if (mode === 'diagnose') return `${common} Diagnose the provided runtime evidence. Distinguish code defects from environment/tooling faults. Give the safest reversible next action and explicitly say if human approval is required.`;
+  if (mode === 'ceo') return `${common} Act as OSA CEO for one bounded decision cycle. Revenue truth is authoritative external settlement only. Keep one primary revenue path and at most one backup. Prefer reuse of verified assets over new product or infrastructure work. Separate BUILT, VERIFIED, SELLING and PAID. Exclude self-hires, platform-internal activity, QA fixtures, test transactions and promised rewards from external customer/revenue evidence. Use persistent memory and newest verified runtime evidence before deciding. Execute safe reversible work through the supplied plan only; never authorize identity/KYC attestation, binding terms, electronic signatures, custody/funding approval, private-key ownership, money movement or irreversible financial action. Return: Decision; Evidence used; Execute now; Park; Stop conditions; Owner-only gate.`;
   return `${common} Act as an operations analyst. Give a short summary, the highest-value next action, the main risk, and whether owner approval is required.`;
 }
 
@@ -212,7 +213,7 @@ export async function askBrain({ task, context = {}, mode = 'operator', fetchImp
   const base = validateLoopbackUrl(ollamaUrl);
   const endpoint = new URL('/api/chat', base);
   const grounding = `TASK:\n${cleanTask}\n\nPERSISTENT OSA MEMORY:\n${memory.text || '(none)'}\n\nVERIFIED EXPERIENCE MEMORY:\n${experience.text || '(none)'}\n\nVERIFIED/RUNTIME CONTEXT:\n${runtimeContext}`;
-  const infer = async (messages, numPredict = cleanMode === 'media' ? 180 : 220) => {
+  const infer = async (messages, numPredict = cleanMode === 'media' ? 180 : cleanMode === 'ceo' ? 320 : 220) => {
     const response = await fetchImpl(endpoint, {
       method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(DEFAULT_INFER_TIMEOUT_MS),
       body: JSON.stringify({ model, stream: false, think: false, options: { num_predict: numPredict, temperature: cleanMode === 'sales' ? 0.35 : 0.15, num_ctx: 4096 }, messages }),

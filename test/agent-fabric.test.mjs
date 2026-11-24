@@ -34,3 +34,15 @@ test('revenue goal plans revenue-first agents', () => {
   const ids = planForGoal('نبغا دخل revenue وفلوس', agents).map((x) => x.id);
   assert.deepEqual(ids, ['revenue-scout', 'lead-auditor', 'mcp-verifier', 'payment-watch']);
 });
+
+
+test('NEAR revenue goal prefers the specialist path without duplicates', () => {
+  const agents = [
+    { id: 'near-market-scout', args: 'none', enabled: true, access: 'read_only' },
+    { id: 'near-listing-spec', args: 'none', enabled: true, access: 'draft' },
+    { id: 'payment-watch', args: 'none', enabled: true, access: 'read_only' },
+    { id: 'revenue-scout', args: 'none', enabled: true, access: 'read_only' },
+  ];
+  const ids = planForGoal('NEAR Agent Market cross-owner paid settlement', agents).map((x) => x.id);
+  assert.deepEqual(ids, ['near-market-scout', 'near-listing-spec', 'payment-watch']);
+});

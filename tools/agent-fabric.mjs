@@ -120,7 +120,12 @@ export async function runAgent(agent, args = [], { env = process.env, cwd = ROOT
 export function planForGoal(goal, agents) {
   const text = String(goal || '').toLowerCase();
   const wanted = [];
-  const add = (id, why) => { const agent = agents.find((x) => x.id === id); if (agent) wanted.push({ id, why, requires_args: agent.args !== 'none', enabled: agent.enabled === true, access: agent.access }); };
+  const add = (id, why) => { const agent = agents.find((x) => x.id === id); if (agent && !wanted.some((x) => x.id === id)) wanted.push({ id, why, requires_args: agent.args !== 'none', enabled: agent.enabled === true, access: agent.access }); };
+  if (/\bnear\b|agent market|mcp\/api preflight|cross-owner|وكيل.*سوق|سوق.*وكيل/.test(text)) {
+    add('near-market-scout', 'verify current NEAR Agent Market demand before listing or building');
+    add('near-listing-spec', 'reuse the existing MCP preflight capability as a narrow sellable listing');
+    add('payment-watch', 'preserve settlement truth while the experiment advances');
+  }
   if (/revenue|sales|lead|money|cash|عميل|دخل|فلوس|ايراد|إيراد/.test(text)) {
     add('revenue-scout', 'find current demand before building');
     add('lead-auditor', 'prove a prospect problem before outreach');
