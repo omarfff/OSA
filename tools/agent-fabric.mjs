@@ -120,25 +120,49 @@ export async function runAgent(agent, args = [], { env = process.env, cwd = ROOT
 export function planForGoal(goal, agents) {
   const text = String(goal || '').toLowerCase();
   const wanted = [];
-  const add = (id, why) => { const agent = agents.find((x) => x.id === id); if (agent && !wanted.some((x) => x.id === id)) wanted.push({ id, why, requires_args: agent.args !== 'none', enabled: agent.enabled === true, access: agent.access }); };
+  const add = (id, why) => {
+    const agent = agents.find((x) => x.id === id);
+    if (agent && !wanted.some((x) => x.id === id)) {
+      wanted.push({ id, why, requires_args: agent.args !== 'none', enabled: agent.enabled === true, access: agent.access });
+    }
+  };
+
+  const explicitPaidMarket = /taskmarket|basedagents|funded task|paid task|first dollar|microtask|base mainnet|usdc task|x402 task|zero[- ]spend/.test(text);
+  const settlementCheck = /payment|settlement|payout|wallet|revenue truth|canonical revenue|paid\b/.test(text);
+  const prospectWork = /lead|prospect|outreach|buyer|sales|mcp|endpoint|conversion/.test(text);
+
+  if (explicitPaidMarket) {
+    add('taskmarket-scout', 'read official Base Mainnet task state directly; rank zero-spend USDC work before any LLM interpretation');
+  }
+
   if (/\bnear\b|agent market|mcp\/api preflight|cross-owner|وكيل.*سوق|سوق.*وكيل/.test(text)) {
     add('near-market-scout', 'verify current NEAR Agent Market demand before listing or building');
     add('near-listing-spec', 'reuse the existing MCP preflight capability as a narrow sellable listing');
   }
-  if (/revenue|sales|lead|money|cash|عميل|دخل|فلوس|ايراد|إيراد/.test(text)) {
-    add('revenue-scout', 'find current demand before building');
+
+  if (/revenue|sales|lead|money|cash|عميل|دخل|فلوس|ايراد|إيراد/.test(text) && !explicitPaidMarket) {
+    add('revenue-scout', 'collect broad market evidence only when the goal is not already tied to a specific paid marketplace');
+  }
+
+  if (prospectWork) {
     add('lead-auditor', 'prove a prospect problem before outreach');
     add('mcp-verifier', 'verify a technical offer or endpoint before selling');
-    add('payment-watch', 'watch for verified settlement evidence');
   }
+
+  if (settlementCheck) {
+    add('payment-watch', 'legacy supplemental signal only; canonical settlement must come from payment ledgers');
+  }
+
   if (/health|runtime|browser|server|خادم|سيرفر|متصفح|عطل/.test(text)) {
     add('browser-health', 'check browser/runtime health');
     add('watchdog', 'surface the smallest operational blocker');
   }
+
   if (/bounty|superteam|مهمة|باونتي|مكاف/.test(text)) {
     add('superteam-builder', 'prepare a focused bounty artifact');
     add('superteam-submitter', 'submit only after write gate and platform prerequisites are satisfied');
   }
+
   if (/media|marketing|content|محتوى|تسويق/.test(text)) add('media-worker', 'prepare factual marketing support without auto-publishing');
   return wanted.length ? wanted : agents.filter((x) => x.enabled).map((x) => ({ id: x.id, why: 'available default agent', requires_args: x.args !== 'none', enabled: true, access: x.access }));
 }
