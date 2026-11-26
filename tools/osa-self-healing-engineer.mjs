@@ -14,6 +14,10 @@ const ALLOWED = /^(tools|ops|src|config|scripts|test|tests)\//;
 const DENIED = /(^|\/)(\.env|\.git|node_modules)(\/|$)|secret|credential|private[_-]?key|seed[_-]?phrase/i;
 const SENSITIVE_DIFF = /^\+.*\b(password|private[_-]?key|seed[_-]?phrase|api[_-]?key|secret[_-]?key)\s*[:=]/im;
 
+function emit(result) {
+  process.stdout.write('SELF_HEAL_RESULT='+JSON.stringify(result)+'\n');
+}
+
 function compactText(v, max=6000) {
   return String(v ?? '').replace(/\u0000/g,'').slice(0,max);
 }
@@ -154,7 +158,7 @@ async function main() {
     } else {
       result.ok=true; result.diagnosis=known;
     }
-    process.stdout.write(JSON.stringify(result)+'\n');
+    emit(result);
     return;
   }
 
@@ -210,7 +214,7 @@ async function main() {
     if (!valid.ok) {
       result.ok=valid.reason==='empty_diff';
       result.no_patch_reason=valid.reason;
-      process.stdout.write(JSON.stringify(result)+'\n');
+      emit(result);
       return;
     }
 
@@ -234,7 +238,7 @@ async function main() {
       result.rollback=true;
       result.ok=false;
       result.failure='verification_failed';
-      process.stdout.write(JSON.stringify(result)+'\n');
+      emit(result);
       return;
     }
 
@@ -243,7 +247,7 @@ async function main() {
     const latest=(await run('git',['rev-parse','origin/main'],{cwd:ROOT,timeout:15000})).stdout.trim();
     if (latest!==base) {
       result.rollback=true; result.failure='origin_main_changed_during_repair';
-      process.stdout.write(JSON.stringify(result)+'\n');
+      emit(result);
       return;
     }
 
@@ -255,7 +259,7 @@ async function main() {
     const push=await run('git',['push','origin','HEAD:main'],{cwd:tmp,timeout:120000});
     if (!push.ok) throw new Error('git_push_failed:'+push.stderr);
     result.commit=sha; result.ok=true;
-    process.stdout.write(JSON.stringify(result)+'\n');
+    emit(result);
   } finally {
     if (worktreeAdded) await run('git',['worktree','remove','--force',tmp],{cwd:ROOT,timeout:60000});
     else { try { await fs.rm(tmp,{recursive:true,force:true}); } catch {} }
@@ -263,6 +267,6 @@ async function main() {
 }
 
 main().catch((err)=>{
-  process.stdout.write(JSON.stringify({ok:false,mode:'self_heal',error:String(err?.message||err).slice(0,5000)})+'\n');
+  emit({ok:false,mode:'self_heal',error:String(err?.message||err).slice(0,5000)});
   process.exitCode=1;
 });
