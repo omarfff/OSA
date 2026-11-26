@@ -8,6 +8,20 @@
   },
   "agents": [
     {
+      "id": "taskmarket-scout",
+      "name": "TaskMarket Base Scout",
+      "domain": "commercial",
+      "purpose": "Read official TaskMarket Base Mainnet funded task state directly and rank zero-spend USDC work without using an LLM.",
+      "command": [
+        "node",
+        "tools/taskmarket-scout.mjs"
+      ],
+      "args": "none",
+      "access": "read_only",
+      "revenue_impact": "direct",
+      "enabled": true
+    },
+    {
       "id": "revenue-scout",
       "name": "Revenue Scout",
       "domain": "commercial",
@@ -110,7 +124,7 @@
       "id": "payment-watch",
       "name": "Payment Watch Bot",
       "domain": "payments",
-      "purpose": "Observe configured public wallet/payment receipt signals; never transfer or sign funds.",
+      "purpose": "Legacy Telegram wallet tracker; disabled from generic revenue planning because canonical settlement verification is handled by Supabase/payment ledgers and must not depend on Telegram.",
       "command": [
         "node",
         "tools/telegram-wallet-tracker.mjs"
@@ -118,7 +132,7 @@
       "args": "none",
       "access": "read_only",
       "revenue_impact": "direct",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "ai-router-status",
