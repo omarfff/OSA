@@ -117,6 +117,28 @@ async function repoEvidence(cwd,payload) {
   return parts.join('\n\n').slice(0,MAX_CONTEXT);
 }
 
+async function askLocalCoder(prompt) {
+  try {
+    const res=await fetch('http://127.0.0.1:11434/api/generate',{
+      method:'POST',
+      headers:{'content-type':'application/json'},
+      signal:AbortSignal.timeout(150000),
+      body:JSON.stringify({
+        model:MODEL,
+        prompt,
+        stream:false,
+        format:'json',
+        options:{temperature:0.05,num_predict:1400}
+      })
+    });
+    if (!res.ok) return null;
+    const body=await res.json();
+    return String(body?.response||'');
+  } catch {
+    return null;
+  }
+}
+
 function extractJson(text) {
   const raw=String(text||'').trim().replace(/^\`\`\`(?:json)?/i,'').replace(/\`\`\`$/,'').trim();
   try { return JSON.parse(raw); } catch {}
@@ -231,10 +253,7 @@ async function main() {
       evidence || '(no direct code match found)'
     ].join('\n\n');
 
-    const direct=await run('ollama',['run',MODEL,prompt],{
-      cwd:tmp,timeout:180000,env:{OLLAMA_NOHISTORY:'1'},maxBuffer:2*1024*1024
-    });
-    let answer=direct.stdout;
+    let answer=await askLocalCoder(prompt);
     let proposal=extractJson(answer);
     let modelUsed=MODEL;
     if (!proposal) {
