@@ -191,18 +191,15 @@ async function main() {
       evidence || '(no direct code match found)'
     ].join('\n\n');
 
-    const ai=await run('ollama',['run',MODEL],{cwd:tmp,timeout:180000,env:{OLLAMA_NOHISTORY:'1'},maxBuffer:2*1024*1024});
-    // Ollama CLI accepts prompt as positional only unreliably; retry through stdin via shell-free temp prompt file + cat is avoided.
-    // If first call produced no useful answer, use the local OSA AI router which accepts the task as an argument.
-    let answer=ai.stdout;
+    const direct=await run('ollama',['run',MODEL,prompt],{
+      cwd:tmp,timeout:180000,env:{OLLAMA_NOHISTORY:'1'},maxBuffer:2*1024*1024
+    });
+    let answer=direct.stdout;
     if (!answer || answer.length<20) {
-      const helper=await run('bash',['ops/ai-router-with-brain-env.sh','ask',prompt],{cwd:tmp,timeout:180000,maxBuffer:2*1024*1024});
+      const helper=await run('bash',['ops/ai-router-with-brain-env.sh','ask',prompt],{
+        cwd:tmp,timeout:180000,maxBuffer:2*1024*1024
+      });
       answer=helper.stdout;
-    }
-    // qwen via ollama requires the prompt argument on this host.
-    if (!answer || answer.length<20) {
-      const direct=await run('ollama',['run',MODEL,prompt],{cwd:tmp,timeout:180000,maxBuffer:2*1024*1024});
-      answer=direct.stdout;
     }
     const proposal=extractJson(answer);
     if (!proposal) throw new Error('coder_output_not_json');
