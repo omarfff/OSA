@@ -233,6 +233,20 @@
       "access": "write",
       "revenue_impact": "direct",
       "enabled": false
+    },
+    {
+      "id": "self-healing-engineer",
+      "name": "OSA Self-Healing Engineer",
+      "domain": "control",
+      "purpose": "Diagnose repeated runtime/code failures, propose the smallest safe patch with qwen2.5-coder:1.5b, verify in an isolated git worktree, commit/push only after deterministic tests, and roll back automatically on verification failure.",
+      "command": [
+        "node",
+        "tools/osa-self-healing-engineer.mjs"
+      ],
+      "args": "passthrough",
+      "access": "write",
+      "revenue_impact": "blocker",
+      "enabled": true
     }
   ]
 }
