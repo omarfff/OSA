@@ -158,6 +158,10 @@ export function planForGoal(goal, agents) {
     add('watchdog', 'surface the smallest operational blocker');
   }
 
+  if (/self[- ]?heal|repair|fix|bug|incident|failure|failed|crash|exception|rollback|root cause|اصلح|إصلاح|عطل/.test(text)) {
+    add('self-healing-engineer', 'diagnose the root cause, patch in an isolated worktree, run deterministic verification, and push only verified repairs');
+  }
+
   if (/bounty|superteam|مهمة|باونتي|مكاف/.test(text)) {
     add('superteam-builder', 'prepare a focused bounty artifact');
     add('superteam-submitter', 'submit only after write gate and platform prerequisites are satisfied');
