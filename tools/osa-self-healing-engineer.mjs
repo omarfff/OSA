@@ -235,14 +235,18 @@ async function main() {
       cwd:tmp,timeout:180000,env:{OLLAMA_NOHISTORY:'1'},maxBuffer:2*1024*1024
     });
     let answer=direct.stdout;
-    if (!answer || answer.length<20) {
+    let proposal=extractJson(answer);
+    let modelUsed=MODEL;
+    if (!proposal) {
       const helper=await run('bash',['ops/ai-router-with-brain-env.sh','ask',prompt],{
         cwd:tmp,timeout:180000,maxBuffer:2*1024*1024
       });
       answer=helper.stdout;
+      proposal=extractJson(answer);
+      modelUsed='ai-router-fallback';
     }
-    const proposal=extractJson(answer);
-    if (!proposal) throw new Error('coder_output_not_json');
+    result.model=modelUsed;
+    if (!proposal) throw new Error('coder_and_router_output_not_json');
     result.diagnosis=compactText(proposal.diagnosis,3000);
     result.confidence=Number(proposal.confidence||0);
     const diff=String(proposal.unified_diff||'');
