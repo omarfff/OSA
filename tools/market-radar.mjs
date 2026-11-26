@@ -353,7 +353,29 @@ export async function runMarketRadar({ fetchImpl = fetch, now = Date.now() } = {
     prior_cycles: history,
     fetch_failures: evidence.failures,
   };
-  const brain = await callBrain(context, fetchImpl);
+  let brain;
+  try {
+    brain = await callBrain(context, fetchImpl);
+  } catch (err) {
+    const reason = String(err?.message || err).slice(0, 240);
+    const top = deterministicWatchlist.slice(0, 5).map((x) => ({
+      sector: x.sector,
+      opportunity_score: x.opportunity_score,
+      independent_sources: x.independent_sources,
+      credible_articles: x.credible_articles,
+    }));
+    brain = {
+      text: JSON.stringify({
+        mode: 'deterministic_fallback',
+        reason,
+        note: 'Brain commentary unavailable; deterministic watchlist remains canonical. No buyer, payout or revenue is inferred from this fallback.',
+        top_watchlist: top,
+      }),
+      model: 'deterministic-fallback',
+      memory_sources: [],
+      experience_sources: [],
+    };
+  }
   const run = {
     at: new Date(now).toISOString(),
     item_count: evidence.items.length,
