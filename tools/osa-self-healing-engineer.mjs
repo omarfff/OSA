@@ -212,8 +212,9 @@ async function main() {
     const diff=String(proposal.unified_diff||'');
     const valid=validateDiff(diff);
     if (!valid.ok) {
-      result.ok=valid.reason==='empty_diff';
+      result.ok=false;
       result.no_patch_reason=valid.reason;
+      result.failure='no_verified_patch';
       emit(result);
       return;
     }
