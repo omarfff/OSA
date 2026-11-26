@@ -63,6 +63,39 @@ function keywords(payload) {
     .slice(0,8);
 }
 
+
+async function agentToolEvidence(cwd,payload) {
+  const goal=[
+    payload.summary,payload.failure_class,payload.last_error,payload.stderr,
+    payload.task_key,payload.title,payload.purpose
+  ].filter(Boolean).join(' ').slice(0,5000);
+  if (!goal) return '';
+  const planRun=await run('node',['tools/agent-fabric.mjs','plan',goal],{cwd,timeout:30000,maxBuffer:512*1024});
+  if (!planRun.ok || !planRun.stdout) return '';
+  let plan;
+  try { plan=JSON.parse(planRun.stdout); } catch { return ''; }
+  const urlMatch=goal.match(/https?:\/\/[^\s<>"']+/);
+  const outputs=[];
+  for (const item of (plan?.plan||[])) {
+    if (outputs.length>=3) break;
+    if (!item?.id || item.id==='self-healing-engineer') continue;
+    if (!['read_only','draft'].includes(item.access)) continue;
+    const args=[];
+    if (item.requires_args) {
+      if (!urlMatch) continue;
+      args.push(urlMatch[0].replace(/[),.;\]]+$/,''));
+    }
+    const r=await run('node',['tools/agent-fabric.mjs','run',item.id,...args],{
+      cwd,timeout:90000,maxBuffer:768*1024
+    });
+    outputs.push({
+      agent:item.id,why:item.why,ok:r.ok,
+      stdout:r.stdout.slice(0,5000),stderr:r.stderr.slice(0,1500)
+    });
+  }
+  return outputs.length ? JSON.stringify(outputs) : '';
+}
+
 async function repoEvidence(cwd,payload) {
   const parts=[];
   const files = new Set();
@@ -176,6 +209,7 @@ async function main() {
     worktreeAdded=true;
 
     const evidence=await repoEvidence(tmp,payload);
+    const toolEvidence=await agentToolEvidence(tmp,payload);
     const prompt=[
       'You are OSA Self-Healing Coding Engineer.',
       'Return ONLY strict JSON: {"diagnosis":"...","confidence":0.0,"unified_diff":"...","why_tests":"..."}.',
@@ -191,6 +225,8 @@ async function main() {
         summary:compactText(payload.summary,2500),task_key:payload.task_key,title:payload.title,
         purpose:payload.purpose,blocked_reason:compactText(payload.blocked_reason,2000)
       }),
+      'TOOL EVIDENCE:',
+      toolEvidence || '(no additional agent-tool evidence)',
       'REPOSITORY EVIDENCE:',
       evidence || '(no direct code match found)'
     ].join('\n\n');
