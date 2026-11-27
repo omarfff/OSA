@@ -1,7 +1,7 @@
 -- OSA autonomous self-healing control plane.
--- Exported from live Supabase on 2026-11-26.
+-- Exported from live Supabase on 2026-11-27 after incident-reconciliation repair.
 -- Deterministic playbooks are preferred; coding models are proposal-only.
--- Any generative patch must pass isolated worktree, git apply check, deterministic tests,
+-- Generative patches require isolated worktree, git apply check, deterministic tests,
 -- origin/main lease verification and rollback/no-push on failure.
 
 CREATE OR REPLACE FUNCTION osa_company.deterministic_reroute_failed_vps_task(p_vps_task_id uuid)
@@ -301,6 +301,118 @@ end
 $function$
 
 
+CREATE OR REPLACE FUNCTION osa_company.reconcile_operational_incidents(p_date date DEFAULT ((now() AT TIME ZONE 'Africa/Cairo'::text))::date)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SET search_path TO ''
+AS $function$
+declare
+  progressed jsonb;
+  superseded integer;
+begin
+  progressed:=osa_company.reconcile_progressed_company_incidents(p_date);
+  superseded:=osa_company.reconcile_superseded_vps_incidents();
+  return jsonb_build_object(
+    'company_incidents',progressed,
+    'superseded_vps_incidents_resolved',superseded
+  );
+end
+$function$
+
+
+CREATE OR REPLACE FUNCTION osa_company.reconcile_progressed_company_incidents(p_date date DEFAULT ((now() AT TIME ZONE 'Africa/Cairo'::text))::date)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SET search_path TO ''
+AS $function$
+declare
+  resolved_n integer:=0;
+  deferred_n integer:=0;
+  reopened_n integer:=0;
+  rc integer:=0;
+begin
+  -- Successful dispatch means the incident that represented "no progress" is resolved.
+  update osa_company.incidents i
+  set status='resolved',
+      resolved_at=coalesce(i.resolved_at,now()),
+      last_progress_at=greatest(coalesce(i.last_progress_at,'epoch'::timestamptz),
+                                nullif(t.evidence->>'dispatch_last_completed_at','')::timestamptz),
+      details=i.details||jsonb_build_object(
+        'resolution','Latest dispatch succeeded after incident opened; progress incident closed.',
+        'resolved_by','osa_company.reconcile_progressed_company_incidents',
+        'dispatch_last_vps_task_id',t.evidence->>'dispatch_last_vps_task_id',
+        'dispatch_last_completed_at',t.evidence->>'dispatch_last_completed_at',
+        'resolved_at',now()
+      ),
+      updated_at=now()
+  from osa_company.tasks t
+  where i.source_type='company_task'
+    and i.source_ref=t.id::text
+    and i.status in ('open','in_progress')
+    and t.plan_date=p_date
+    and t.state not in ('blocked','waiting','failed')
+    and t.evidence->>'dispatch_last_state'='succeeded'
+    and nullif(t.evidence->>'dispatch_last_completed_at','') is not null
+    and (t.evidence->>'dispatch_last_completed_at')::timestamptz >= i.opened_at
+    and osa_company.task_execution_contract(
+      t.task_key,t.title,t.objective,t.state,t.evidence,t.blocked_reason
+    ) <> 'external_wait';
+  get diagnostics rc=row_count; resolved_n:=resolved_n+rc;
+
+  -- External waits are not code/runtime failures and must not stay Critical/High.
+  update osa_company.incidents i
+  set status='deferred',
+      details=i.details||jsonb_build_object(
+        'deferred_reason','External decision/wait is non-actionable by self-healer.',
+        'deferred_by','osa_company.reconcile_progressed_company_incidents',
+        'deferred_at',now()
+      ),
+      updated_at=now()
+  from osa_company.tasks t
+  where i.source_type='company_task'
+    and i.source_ref=t.id::text
+    and i.status in ('open','in_progress')
+    and t.plan_date=p_date
+    and osa_company.task_execution_contract(
+      t.task_key,t.title,t.objective,t.state,t.evidence,t.blocked_reason
+    )='external_wait';
+  get diagnostics rc=row_count; deferred_n:=deferred_n+rc;
+
+  -- A later real dispatch failure or blocked state reopens a previously resolved progress incident.
+  update osa_company.incidents i
+  set status=case when t.state='in_progress' then 'in_progress' else 'open' end,
+      resolved_at=null,
+      details=i.details||jsonb_build_object(
+        'reopened_reason','Source task has a newer failed dispatch or is blocked.',
+        'reopened_by','osa_company.reconcile_progressed_company_incidents',
+        'dispatch_last_vps_task_id',t.evidence->>'dispatch_last_vps_task_id',
+        'reopened_at',now()
+      ),
+      updated_at=now()
+  from osa_company.tasks t
+  where i.source_type='company_task'
+    and i.source_ref=t.id::text
+    and i.status='resolved'
+    and t.plan_date=p_date
+    and (
+      t.state='blocked'
+      or (
+        t.evidence->>'dispatch_last_state'='failed'
+        and nullif(t.evidence->>'dispatch_last_completed_at','') is not null
+        and (t.evidence->>'dispatch_last_completed_at')::timestamptz > coalesce(i.resolved_at,'epoch'::timestamptz)
+      )
+    );
+  get diagnostics rc=row_count; reopened_n:=reopened_n+rc;
+
+  return jsonb_build_object(
+    'resolved_after_progress',resolved_n,
+    'external_wait_deferred',deferred_n,
+    'reopened_on_new_failure',reopened_n
+  );
+end
+$function$
+
+
 CREATE OR REPLACE FUNCTION osa_company.reconcile_self_heal_runs()
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -427,6 +539,84 @@ end
 $function$
 
 
+CREATE OR REPLACE FUNCTION osa_company.reconcile_superseded_vps_incidents()
+ RETURNS integer
+ LANGUAGE plpgsql
+ SET search_path TO ''
+AS $function$
+declare
+  n integer:=0;
+begin
+  update osa_company.incidents i
+  set status='resolved',
+      resolved_at=coalesce(i.resolved_at,now()),
+      details=i.details||jsonb_build_object(
+        'resolution','Earlier VPS failure superseded by later successful execution for the same company task/tool purpose.',
+        'resolved_by','osa_company.reconcile_superseded_vps_incidents',
+        'resolved_at',now()
+      ),
+      updated_at=now()
+  where i.source_type='vps_task'
+    and i.status in ('open','in_progress','deferred')
+    and exists (
+      select 1
+      from public.osa_vps_tasks failed
+      where failed.id::text=i.source_ref
+        and failed.state='failed'
+        and (
+          exists (
+            select 1
+            from public.osa_vps_tasks ok
+            where ok.state='succeeded'
+              and ok.requested_at>failed.requested_at
+              and (
+                (
+                  nullif(failed.metadata->>'company_task_id','') is not null
+                  and ok.metadata->>'company_task_id'=failed.metadata->>'company_task_id'
+                )
+                or (
+                  nullif(failed.metadata->>'purpose','') is not null
+                  and ok.metadata->>'purpose'=failed.metadata->>'purpose'
+                  and ok.requested_by=failed.requested_by
+                )
+              )
+          )
+          or (
+            coalesce(failed.metadata->>'purpose','') ilike '%Workparty%'
+            and exists (
+              select 1 from public.osa_vps_tasks ok
+              where ok.state='succeeded'
+                and ok.requested_at>failed.requested_at
+                and coalesce(ok.metadata->>'purpose','') ilike '%Workparty%'
+            )
+          )
+          or (
+            coalesce(failed.metadata->>'purpose','')='ceo_learning_cycle'
+            and exists (
+              select 1 from public.osa_vps_tasks ok
+              where ok.state='succeeded'
+                and ok.requested_at>failed.requested_at
+                and ok.metadata->>'purpose'='ceo_learning_cycle'
+            )
+          )
+          or (
+            coalesce(failed.metadata->>'purpose','') ilike '%TaskMarket readiness%'
+            and exists (
+              select 1 from public.osa_vps_tasks ok
+              where ok.state='succeeded'
+                and ok.requested_at>failed.requested_at
+                and coalesce(ok.metadata->>'purpose','') ilike '%TaskMarket%'
+            )
+          )
+        )
+    );
+
+  get diagnostics n=row_count;
+  return n;
+end
+$function$
+
+
 CREATE OR REPLACE FUNCTION osa_company.self_heal_cycle()
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -441,7 +631,7 @@ declare
 begin
   perform public.osa_reap_stuck_vps_tasks();
   reconciled := osa_company.reconcile_self_heal_runs();
-  perform osa_company.reconcile_superseded_vps_incidents();
+  perform osa_company.reconcile_operational_incidents(((now() at time zone 'Africa/Cairo')::date));
 
   select id into active_id
   from public.osa_vps_tasks
