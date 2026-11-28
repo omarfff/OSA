@@ -1,12 +1,13 @@
 -- OSA production recovery fixes from the 2026-11-28 root-cause investigation.
--- Exported from live Supabase after verification.
--- Key invariants:
--- 1) business outcomes are not generative code bugs;
--- 2) external_effect work is delegated to the Revenue Closing Desk, not generic Agent Fabric;
--- 3) inspect/control routing prefers the empirically healthy controller;
--- 4) watchdog incidents are age/failure/due driven, not priority-only;
--- 5) dispatcher logical failure is recorded without forcing runner timeout;
--- 6) finance reconciliation accepts durable verified infrastructure evidence.
+-- Exported from live Supabase after final routing/taxonomy/delegation repair.
+-- Invariants:
+-- * business/capability outcomes are not generative code bugs;
+-- * external_effect work is delegated to the hourly Revenue Closing Desk;
+-- * inspect/control work uses the empirically healthy controller;
+-- * web/monitor are excluded from generic routing while quarantined;
+-- * watchdog incidents are driven by failure/age/due state, not priority alone;
+-- * dispatcher distinguishes process success from logical contract success;
+-- * canonical finance tasks use fresh payment truth and durable verified infrastructure evidence.
 
 CREATE OR REPLACE FUNCTION osa_company.dispatch_incidents(p_date date DEFAULT ((now() AT TIME ZONE 'Africa/Cairo'::text))::date, p_limit integer DEFAULT 3)
  RETURNS integer
@@ -548,6 +549,7 @@ begin
   join osa_company.divisions d on d.division_id=t.division_id
   where t.plan_date=p_date
     and t.state in ('queued','in_progress','waiting','blocked')
+    and coalesce(t.evidence->>'external_execution_mode','')<>'automation_closing_desk'
     and not (
       t.state='waiting'
       and nullif(t.evidence->>'external_wait_until','') is not null
@@ -708,7 +710,7 @@ begin
   if not found or v.state<>'failed' then return false; end if;
 
   if v.requested_by='osa_company.self_healer'
-     or v.requested_by in ('chatgpt.investigation','chatgpt.control_probe','chatgpt.self_heal_verify')
+     or v.requested_by in ('chatgpt.investigation','chatgpt.control_probe','chatgpt.self_heal_verify','osa_revenue_closing_desk.inline')
      or coalesce(v.metadata->>'purpose','') ilike '%self-heal%'
      or coalesce(v.metadata->>'purpose','') ilike '%self healing%'
   then return false; end if;
