@@ -1,13 +1,14 @@
 -- OSA production recovery fixes from the 2026-11-28 root-cause investigation.
--- Exported from live Supabase after final routing/taxonomy/delegation repair.
+-- Exported from live Supabase after final validation.
 -- Invariants:
 -- * business/capability outcomes are not generative code bugs;
 -- * external_effect work is delegated to the hourly Revenue Closing Desk;
--- * inspect/control work uses the empirically healthy controller;
--- * web/monitor are excluded from generic routing while quarantined;
+-- * inspect/control routing prefers the empirically healthy controller;
+-- * web/monitor are quarantined from generic routing until health is re-proven;
+-- * control-sweep retries reroute to healthy workers and exclude probes/business outcomes;
 -- * watchdog incidents are driven by failure/age/due state, not priority alone;
--- * dispatcher distinguishes process success from logical contract success;
--- * canonical finance tasks use fresh payment truth and durable verified infrastructure evidence.
+-- * dispatcher separates process completion from logical contract outcome;
+-- * finance uses fresh canonical payment truth and durable verified evidence.
 
 CREATE OR REPLACE FUNCTION osa_company.dispatch_incidents(p_date date DEFAULT ((now() AT TIME ZONE 'Africa/Cairo'::text))::date, p_limit integer DEFAULT 3)
  RETURNS integer
@@ -1377,6 +1378,133 @@ end
 $function$
 
 
+CREATE OR REPLACE FUNCTION osa_company.reconcile_self_heal_runs()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SET search_path TO ''
+AS $function$
+declare
+  r record;
+  n_ok integer:=0;
+  n_fail integer:=0;
+  is_ok boolean;
+  result_excerpt text;
+begin
+  for r in
+    select *
+    from public.osa_vps_tasks
+    where requested_by='osa_company.self_healer'
+      and state in ('succeeded','failed','cancelled')
+      and coalesce(metadata->>'self_heal_reconciled','false')<>'true'
+      and coalesce(metadata->>'self_heal_obsolete','false')<>'true'
+    order by completed_at nulls last,requested_at
+    limit 30
+  loop
+    result_excerpt := left(coalesce(r.stdout,'')||E'\n'||coalesce(r.stderr,''),7000);
+    is_ok := r.state='succeeded'
+      and (
+        r.metadata->>'repair_mode'='deterministic_reroute'
+        or (
+          result_excerpt like '%SELF_HEAL_RESULT=%'
+          and (result_excerpt like '%"ok":true%' or result_excerpt like '%\"ok\":true%')
+        )
+      );
+
+    if is_ok then
+      update osa_company.incidents
+      set status='resolved',resolved_at=coalesce(resolved_at,now()),
+          details=details||jsonb_build_object(
+            'resolution',case when r.metadata->>'repair_mode'='deterministic_reroute'
+              then 'Autonomous deterministic reroute succeeded on an allowed worker.'
+              else 'Autonomous Self-Healing Engineer returned verified success.' end,
+            'self_heal_vps_task_id',r.id,
+            'self_heal_result_excerpt',left(result_excerpt,3500),
+            'resolved_by','osa_company.reconcile_self_heal_runs','resolved_at',now()
+          ),updated_at=now()
+      where status in ('open','in_progress','deferred')
+        and (
+          incident_key=r.metadata->>'source_incident_key'
+          or (source_type='vps_task' and source_ref=r.metadata->>'source_vps_task_id')
+          or (source_type='company_task' and source_ref=r.metadata->>'source_company_task_id')
+        );
+      n_ok:=n_ok+1;
+    else
+      update osa_company.incidents
+      set details=details||jsonb_build_object(
+            'self_heal_last_attempt_vps_task_id',r.id,
+            'self_heal_last_attempt_state',r.state,
+            'self_heal_last_result_excerpt',left(result_excerpt,3500),
+            'self_heal_last_attempt_at',coalesce(r.completed_at,now())
+          ),updated_at=now()
+      where status in ('open','in_progress')
+        and (
+          incident_key=r.metadata->>'source_incident_key'
+          or (source_type='vps_task' and source_ref=r.metadata->>'source_vps_task_id')
+          or (source_type='company_task' and source_ref=r.metadata->>'source_company_task_id')
+        );
+      n_fail:=n_fail+1;
+    end if;
+
+    insert into osa_company.company_events(event_type,agent_key,division_id,outcome,payload)
+    values(
+      'self_heal_completed','eng.self-healer','engineering',
+      case when is_ok then 'success' else 'failure' end,
+      jsonb_build_object(
+        'self_heal_vps_task_id',r.id,'source_key',r.metadata->>'self_heal_source_key',
+        'repair_mode',r.metadata->>'repair_mode',
+        'source_vps_task_id',r.metadata->>'source_vps_task_id',
+        'source_incident_key',r.metadata->>'source_incident_key',
+        'model',r.metadata->>'model','state',r.state,'verified_success',is_ok,
+        'result_excerpt',left(result_excerpt,5000),'at',now()
+      )
+    );
+
+    insert into osa_brain.events(event_type,domain,subject,payload,outcome,reward,evidence_ref)
+    values(
+      'verified_outcome','engineering','self_heal_cycle',
+      jsonb_build_object(
+        'source_key',r.metadata->>'self_heal_source_key',
+        'self_heal_vps_task_id',r.id,'repair_mode',r.metadata->>'repair_mode',
+        'model',r.metadata->>'model','verified_success',is_ok,
+        'result_excerpt',left(result_excerpt,5000)
+      ),
+      case when is_ok then 'self_heal_verified' else 'self_heal_not_verified' end,
+      case when is_ok then 1 else -1 end,'vps_task:'||r.id::text
+    );
+
+    insert into osa_brain.lessons(
+      lesson_key,summary,evidence_count,success_count,failure_count,score,confidence,
+      metadata,first_event_at,last_event_at
+    )
+    values(
+      'engineering.autonomous_self_heal_loop',
+      'Use deterministic playbooks first (reroute/reaper/reconcile), then tool-grounded coding repair only when needed. Any code patch must pass isolated worktree, git apply check, deterministic tests, origin lease and rollback/no-push on failure.',
+      1,case when is_ok then 1 else 0 end,case when is_ok then 0 else 1 end,
+      case when is_ok then 1 else -1 end,0.92,
+      jsonb_build_object('latest_vps_task_id',r.id,'latest_verified_success',is_ok,'repair_mode',r.metadata->>'repair_mode','model',r.metadata->>'model'),
+      now(),now()
+    )
+    on conflict(lesson_key) do update set
+      summary=excluded.summary,
+      evidence_count=osa_brain.lessons.evidence_count+1,
+      success_count=osa_brain.lessons.success_count+case when is_ok then 1 else 0 end,
+      failure_count=osa_brain.lessons.failure_count+case when is_ok then 0 else 1 end,
+      score=case when is_ok then least(1,osa_brain.lessons.score+0.1) else greatest(-1,osa_brain.lessons.score-0.15) end,
+      confidence=least(0.99,osa_brain.lessons.confidence+0.01),
+      metadata=osa_brain.lessons.metadata||excluded.metadata,
+      last_event_at=now(),updated_at=now();
+
+    update public.osa_vps_tasks
+    set metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object(
+      'self_heal_reconciled',true,'self_heal_verified_success',is_ok,'self_heal_reconciled_at',now()
+    )
+    where id=r.id;
+  end loop;
+  return jsonb_build_object('verified_successes',n_ok,'not_verified',n_fail);
+end
+$function$
+
+
 CREATE OR REPLACE FUNCTION osa_company.resolve_internal_control_tasks(p_date date DEFAULT ((now() AT TIME ZONE 'Africa/Cairo'::text))::date)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -1553,6 +1681,127 @@ begin
     'reconciled',reconciled,
     'internal_control',internal_control
   );
+end
+$function$
+
+
+CREATE OR REPLACE FUNCTION public.osa_control_sweep()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_offline int:=0;v_failed int:=0;v_pending int:=0;v_webhook int:=0;v_resolved int:=0;v_heals int:=0;v_transient_retries int:=0;
+  r record; v_executor uuid; v_service text;
+begin
+  update public.osa_vps_agents set status='offline',updated_at=now()
+   where status<>'disabled' and last_seen is not null and last_seen<now()-interval '2 minutes' and status<>'offline';
+  get diagnostics v_offline=row_count;
+
+  insert into public.osa_control_alerts(severity,alert_type,source_type,source_id,title,detail,dedupe_key)
+  select 'critical','agent_offline','vps_agent',a.id::text,'OSA runner offline',jsonb_build_object('name',a.name,'last_seen',a.last_seen,'role',a.metadata->>'role'),'agent_offline:'||a.id::text
+  from public.osa_vps_agents a
+    where a.status='offline'
+      and a.status<>'disabled'
+      and coalesce((a.metadata->>'execution_quarantined')::boolean,false)=false
+  on conflict(dedupe_key) do update set status='open',resolved_at=null,updated_at=now(),detail=excluded.detail;
+
+  for r in
+    select id,name,metadata->>'role' as role
+    from public.osa_vps_agents
+    where status='offline'
+      and status<>'disabled'
+      and coalesce((metadata->>'execution_quarantined')::boolean,false)=false
+  loop
+    v_service:=case r.role when 'controller' then 'osa-runner.service' when 'build' then 'osa-runner-build.service' when 'web' then 'osa-runner-web.service' when 'monitor' then 'osa-runner-monitor.service' else null end;
+    if v_service is null then continue; end if;
+    if r.role='controller' then
+      select id into v_executor from public.osa_vps_agents where status='online'
+        and metadata->>'role'='build'
+        and last_seen>=now()-interval '2 minutes'
+        and coalesce((metadata->>'execution_quarantined')::boolean,false)=false
+      order by case when name='hostinger-osa-trading' then 1 else 2 end,last_seen desc limit 1;
+    else
+      select id into v_executor from public.osa_vps_agents where status='online'
+        and metadata->>'role'='controller'
+        and last_seen>=now()-interval '2 minutes'
+        and coalesce((metadata->>'execution_quarantined')::boolean,false)=false
+      order by last_seen desc limit 1;
+      if v_executor is null then select id into v_executor from public.osa_vps_agents where status='online'
+        and metadata->>'role'='build'
+        and last_seen>=now()-interval '2 minutes'
+        and coalesce((metadata->>'execution_quarantined')::boolean,false)=false
+      order by case when name='hostinger-osa-trading' then 1 else 2 end,last_seen desc limit 1; end if;
+    end if;
+    if v_executor is not null and not exists(
+      select 1 from public.osa_vps_tasks t where t.state in ('queued','running') and t.metadata->>'autoheal_agent_id'=r.id::text
+    ) then
+      insert into public.osa_vps_tasks(agent_id,operation,command,verify_command,timeout_sec,max_retries,requested_by,metadata)
+      values(v_executor,'restart','systemctl restart '||quote_ident(v_service),'systemctl is-active --quiet '||quote_ident(v_service),120,2,'osa-self-heal',jsonb_build_object('autoheal_agent_id',r.id::text,'autoheal_agent_name',r.name,'service',v_service));
+      v_heals:=v_heals+1;
+    end if;
+    v_executor:=null;
+  end loop;
+
+  update public.osa_control_alerts al set status='resolved',resolved_at=now(),updated_at=now()
+   where al.alert_type='agent_offline' and al.status='open'
+     and exists(select 1 from public.osa_vps_agents a where a.id::text=al.source_id and a.status='online' and a.last_seen>=now()-interval '2 minutes');
+  get diagnostics v_resolved=row_count;
+
+  update public.osa_vps_tasks t
+     set agent_id=coalesce(osa_company.pick_fabric_executor(),t.agent_id),
+         state='queued',started_at=null,completed_at=null,exit_code=null,failure_class=null,
+         not_before=now()+case when t.failure_class='RATE_LIMITED' then interval '60 seconds' else interval '15 seconds' end,
+         metadata=coalesce(t.metadata,'{}'::jsonb) || jsonb_build_object(
+           'control_retry_count',coalesce((t.metadata->>'control_retry_count')::int,0)+1,
+           'control_retry_reason',t.failure_class,
+           'control_retry_at',now()
+         )
+   where t.state='failed'
+     and t.failure_class in ('TIMEOUT','NETWORK_FAILURE','DNS_FAILURE','RATE_LIMITED')
+     and t.operation in ('inspect','monitor','payment_read','browser')
+     and t.risk_level<>'high'
+     and t.completed_at>=now()-interval '10 minutes'
+     and coalesce((t.metadata->>'control_retry_count')::int,0)<1
+     and t.requested_by not in (
+       'chatgpt.investigation','chatgpt.control_probe','chatgpt.self_heal_verify',
+       'osa_revenue_closing_desk.inline','osa_company.self_healer'
+     )
+     and coalesce(t.stdout,'') !~* '(NO_EXTERNAL_EFFECT|NO_SUCCESSFUL_AGENT|NO_BLACKBOX_VERIFIER|PLAN_FAILED|PLAN_PARSE_FAILED)'
+     and osa_company.pick_fabric_executor() is not null
+     and (t.expires_at is null or t.expires_at>now()+interval '2 minutes');
+  get diagnostics v_transient_retries=row_count;
+
+  insert into public.osa_control_alerts(severity,alert_type,source_type,source_id,title,detail,dedupe_key)
+  select case when t.risk_level='high' then 'critical' else 'warning' end,
+         'task_failed','vps_task',t.id::text,
+         case t.failure_class
+           when 'HUMAN_CHALLENGE' then 'OSA task needs human verification'
+           when 'AUTH_EXPIRED' then 'OSA authentication needs renewal'
+           when 'PERMISSION_DENIED' then 'OSA permission blocked'
+           else 'OSA task failed: '||coalesce(t.failure_class,'UNKNOWN')
+         end,
+         jsonb_build_object('operation',t.operation,'agent_id',t.agent_id,'exit_code',t.exit_code,'last_error',left(coalesce(t.last_error,''),1000),'failure_class',t.failure_class,'attempt',t.attempt),
+         'task_failed:'||t.id::text
+  from public.osa_vps_tasks t where t.state='failed' and t.completed_at>=now()-interval '10 minutes'
+  on conflict(dedupe_key) do nothing;
+  get diagnostics v_failed=row_count;
+
+  update public.osa_control_alerts al set status='resolved',resolved_at=coalesce(resolved_at,now()),updated_at=now()
+   where al.alert_type='task_failed' and al.status='open'
+     and exists(select 1 from public.osa_vps_tasks t where t.id::text=al.source_id and t.completed_at<now()-interval '10 minutes');
+
+  insert into public.osa_control_alerts(severity,alert_type,source_type,source_id,title,detail,dedupe_key)
+  select 'warning','approval_pending','approval',a.id::text,'OSA high-risk approval pending',jsonb_build_object('action',a.action,'subject_type',a.subject_type,'subject_id',a.subject_id,'rationale',a.rationale),'approval_pending:'||a.id::text from public.osa_approvals a where a.state='PENDING' and a.created_at<now()-interval '5 minutes' on conflict(dedupe_key) do nothing;
+  get diagnostics v_pending=row_count;
+  update public.osa_control_alerts al set status='resolved',resolved_at=now(),updated_at=now() where al.alert_type='approval_pending' and al.status='open' and exists(select 1 from public.osa_approvals a where a.id::text=al.source_id and a.state<>'PENDING');
+
+  insert into public.osa_control_alerts(severity,alert_type,source_type,source_id,title,detail,dedupe_key)
+  select 'critical','payment_webhook_failed','whop_webhook',w.webhook_id,'Payment webhook failed',jsonb_build_object('event_type',w.event_type,'payment_id',w.payment_id,'status',w.status,'received_at',w.received_at),'whop_failed:'||w.webhook_id from public.osa_whop_webhook_events w where w.status in ('failed','error') and w.received_at>=now()-interval '10 minutes' on conflict(dedupe_key) do nothing;
+  get diagnostics v_webhook=row_count;
+
+  return jsonb_build_object('offline_transitions',v_offline,'self_heal_tasks_created',v_heals,'transient_task_retries',v_transient_retries,'failed_task_alerts',v_failed,'pending_approval_alerts',v_pending,'payment_webhook_alerts',v_webhook,'resolved_agent_alerts',v_resolved,'swept_at',now());
 end
 $function$
 
