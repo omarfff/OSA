@@ -1,14 +1,13 @@
 -- OSA production recovery fixes from the 2026-11-28 root-cause investigation.
--- Exported from live Supabase after final validation.
--- Invariants:
+-- Exported from live Supabase after a clean Watchdog/Dispatcher/Self-Heal/Control-Sweep regression.
+-- Final invariants:
+-- * terminal company tasks cannot be reopened by stale dispatcher evidence;
 -- * business/capability outcomes are not generative code bugs;
--- * external_effect work is delegated to the hourly Revenue Closing Desk;
--- * inspect/control routing prefers the empirically healthy controller;
--- * web/monitor are quarantined from generic routing until health is re-proven;
--- * control-sweep retries reroute to healthy workers and exclude probes/business outcomes;
--- * watchdog incidents are driven by failure/age/due state, not priority alone;
--- * dispatcher separates process completion from logical contract outcome;
--- * finance uses fresh canonical payment truth and durable verified evidence.
+-- * external_effect is delegated to the Revenue Closing Desk;
+-- * inspect/control prefers the healthy controller; web/monitor stay quarantined;
+-- * transient retries reroute and exclude probes/business outcomes;
+-- * watchdog incidents are failure/age/due driven;
+-- * canonical payment truth must be fresh and independently verified.
 
 CREATE OR REPLACE FUNCTION osa_company.dispatch_incidents(p_date date DEFAULT ((now() AT TIME ZONE 'Africa/Cairo'::text))::date, p_limit integer DEFAULT 3)
  RETURNS integer
@@ -968,6 +967,7 @@ begin
     updated_at=now()
   from public.osa_vps_tasks v
   where t.plan_date=p_date
+    and t.state not in ('succeeded','cancelled')
     and t.evidence->>'dispatch_vps_task_id'=v.id::text
     and v.state='succeeded'
     and (
@@ -997,6 +997,8 @@ begin
   join osa_company.tasks t on t.evidence->>'dispatch_last_vps_task_id'=v.id::text
   where i.source_type='company_task'
     and i.source_ref=t.id::text
+    and t.plan_date=p_date
+    and t.state not in ('succeeded','cancelled')
     and v.state='succeeded'
     and (
       coalesce(v.stdout,'') like '%OSA_DISPATCH_LOGICAL_OK=1%'
@@ -1044,6 +1046,7 @@ begin
     updated_at=now()
   from public.osa_vps_tasks v
   where t.plan_date=p_date
+    and t.state not in ('succeeded','cancelled')
     and t.evidence->>'dispatch_vps_task_id'=v.id::text
     and (
       v.state='failed'
@@ -1071,6 +1074,8 @@ begin
   join osa_company.tasks t on t.evidence->>'dispatch_last_vps_task_id'=v.id::text
   where i.source_type='company_task'
     and i.source_ref=t.id::text
+    and t.plan_date=p_date
+    and t.state not in ('succeeded','cancelled')
     and (
       v.state='failed'
       or (v.state='succeeded' and coalesce(v.stdout,'') like '%OSA_DISPATCH_LOGICAL_OK=0%')
@@ -1094,6 +1099,7 @@ begin
           and a2.status='online'
           and a2.last_seen>now()-interval '5 minutes'
           and coalesce(a2.metadata->'capabilities','[]'::jsonb) ? 'inspect'
+          and coalesce((a2.metadata->>'execution_quarantined')::boolean,false)=false
           and not exists(
             select 1 from public.osa_vps_tasks q
             where q.agent_id=a2.id and q.state in ('queued','running')
@@ -1141,6 +1147,7 @@ begin
   progressed:=osa_company.reconcile_progressed_company_incidents(p_date);
   superseded:=osa_company.reconcile_superseded_vps_incidents();
   business_children:=osa_company.reconcile_dispatcher_business_failure_incidents();
+  perform osa_company.resolve_terminal_source_incidents();
   return jsonb_build_object(
     'company_incidents',progressed,
     'superseded_vps_incidents_resolved',superseded,
@@ -1549,6 +1556,68 @@ begin
     'prioritize_completed',prioritized,
     'priority_guard_created',priority_guard is not null,
     'internal_incidents_resolved',resolved_incidents
+  );
+end
+$function$
+
+
+CREATE OR REPLACE FUNCTION osa_company.resolve_terminal_source_incidents()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SET search_path TO ''
+AS $function$
+declare
+  company_n integer:=0;
+  vps_n integer:=0;
+begin
+  update osa_company.incidents i
+  set status='resolved',
+      resolved_at=coalesce(i.resolved_at,now()),
+      details=i.details||jsonb_build_object(
+        'resolution','Source company task is terminal; stale dispatch evidence cannot reopen it.',
+        'resolved_by','osa_company.resolve_terminal_source_incidents',
+        'resolved_at',now()
+      ),
+      updated_at=now()
+  where i.source_type='company_task'
+    and i.status in ('open','in_progress','deferred')
+    and exists(
+      select 1 from osa_company.tasks t
+      where t.id::text=i.source_ref
+        and t.state in ('succeeded','cancelled')
+    );
+  get diagnostics company_n=row_count;
+
+  update osa_company.incidents i
+  set status='resolved',
+      resolved_at=coalesce(i.resolved_at,now()),
+      details=i.details||jsonb_build_object(
+        'resolution','Source VPS task is no longer actionable or its parent task is terminal.',
+        'resolved_by','osa_company.resolve_terminal_source_incidents',
+        'resolved_at',now()
+      ),
+      updated_at=now()
+  where i.source_type='vps_task'
+    and i.status in ('open','in_progress','deferred')
+    and exists(
+      select 1
+      from public.osa_vps_tasks v
+      left join osa_company.tasks t on t.id::text=v.metadata->>'company_task_id'
+      where v.id::text=i.source_ref
+        and (
+          v.state in ('succeeded','cancelled')
+          or t.state in ('succeeded','cancelled')
+          or (
+            v.requested_by='osa_company.execution_dispatcher'
+            and coalesce(v.stdout,'') ~* '(NO_EXTERNAL_EFFECT|NO_SUCCESSFUL_AGENT|NO_BLACKBOX_VERIFIER|PLAN_FAILED|PLAN_PARSE_FAILED)'
+          )
+        )
+    );
+  get diagnostics vps_n=row_count;
+
+  return jsonb_build_object(
+    'terminal_company_incidents_resolved',company_n,
+    'terminal_or_business_vps_incidents_resolved',vps_n
   );
 end
 $function$
