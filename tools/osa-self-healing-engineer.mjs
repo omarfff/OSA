@@ -122,7 +122,7 @@ async function askLocalCoder(prompt) {
     const res=await fetch('http://127.0.0.1:11434/api/generate',{
       method:'POST',
       headers:{'content-type':'application/json'},
-      signal:AbortSignal.timeout(150000),
+      signal:AbortSignal.timeout(90000),
       body:JSON.stringify({
         model:MODEL,
         prompt,
@@ -258,7 +258,14 @@ async function main() {
     let modelUsed=MODEL;
     if (!proposal) {
       const helper=await run('bash',['ops/ai-router-with-brain-env.sh','ask',prompt],{
-        cwd:tmp,timeout:180000,maxBuffer:2*1024*1024
+        cwd:tmp,
+        timeout:90000,
+        maxBuffer:2*1024*1024,
+        env:{
+          OSA_AI_PROVIDER_ORDER_OVERRIDE:'gemini,ollama',
+          OSA_AI_PROVIDER_TIMEOUT_MS:'25000',
+          OSA_AI_MAX_OUTPUT_TOKENS_OVERRIDE:'700'
+        }
       });
       answer=helper.stdout;
       proposal=extractJson(answer);
