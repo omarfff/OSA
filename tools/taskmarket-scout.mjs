@@ -8,6 +8,19 @@ const DEADLINE_HOURS = Number(process.env.OSA_TASKMARKET_DEADLINE_HOURS || 168);
 const LIMIT = Math.max(1, Math.min(Number(process.env.OSA_TASKMARKET_LIMIT || 50), 100));
 const TIMEOUT_MS = Math.max(3000, Math.min(Number(process.env.OSA_TASKMARKET_TIMEOUT_MS || 12000), 30000));
 
+const NETWORKS = new Map([
+  [8453, { name: 'base', paymentToken: 'USDC', paymentMethod: 'x402', environment: 'mainnet' }],
+  [4217, { name: 'tempo', paymentToken: 'OUSD', paymentMethod: 'mpp-tempo', environment: 'mainnet' }],
+  [84532, { name: 'base-sepolia', paymentToken: 'USDC', paymentMethod: 'x402', environment: 'testnet' }],
+  [42431, { name: 'tempo-testnet', paymentToken: 'OUSD', paymentMethod: 'mpp-tempo', environment: 'testnet' }],
+]);
+
+function networkInfo(chainId) {
+  const info = NETWORKS.get(Number(chainId));
+  if (!info) throw new Error(`unsupported_taskmarket_chain:${chainId}`);
+  return info;
+}
+
 function usd(units) {
   const n = Number(units);
   return Number.isFinite(n) ? n / 1e6 : 0;
@@ -64,6 +77,7 @@ function score(task) {
 }
 
 async function main() {
+  const network = networkInfo(CHAIN_ID);
   const q = new URLSearchParams({
     chainId: String(CHAIN_ID),
     status: 'open',
@@ -104,6 +118,8 @@ async function main() {
       description: String(d?.description || '').slice(0, 1800),
       reward_usd: t.reward_usd,
       net_reward_usd: t.net_reward_usd,
+      payment_token: network.paymentToken,
+      payment_method: network.paymentMethod,
       expiryTime: d?.expiryTime ?? t.expiryTime ?? null,
       submissionWindowOpen: d?.submissionWindowOpen ?? null,
       submissionCount: Number(d?.submissionCount ?? t.submissionCount ?? 0),
@@ -127,7 +143,10 @@ async function main() {
     ok: true,
     source: `${API}/api/tasks`,
     chainId: CHAIN_ID,
-    paymentToken: 'USDC',
+    network: network.name,
+    paymentToken: network.paymentToken,
+    paymentMethod: network.paymentMethod,
+    environment: network.environment,
     filter: { min_reward_usd: MIN_REWARD, max_reward_usd: MAX_REWARD, deadline_hours: DEADLINE_HOURS, zero_spend_entry: true },
     found: tasks.length,
     candidates,
