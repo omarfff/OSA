@@ -5,6 +5,11 @@ function clean(value, max = 4000) {
   return String(value ?? '').replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, max);
 }
 
+function providerTimeoutMs(env, fallback = 60000) {
+  const n = Number(env.OSA_AI_PROVIDER_TIMEOUT_MS || fallback);
+  return Math.max(5000, Math.min(Number.isFinite(n) ? Math.trunc(n) : fallback, 120000));
+}
+
 function outputLimit(env, fallback = 400) {
   const n = Number(env.OSA_AI_MAX_OUTPUT_TOKENS || fallback);
   return Math.max(64, Math.min(Number.isFinite(n) ? Math.trunc(n) : fallback, 8192));
@@ -157,13 +162,23 @@ async function callGemini({ messages, fetchImpl, env, signal }) {
   }));
   const body = { contents, generationConfig: { temperature: 0.15, maxOutputTokens: outputLimit(env, 400) } };
   if (system) body.systemInstruction = { parts: [{ text: system }] };
-  const response = await fetchImpl(endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    signal,
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) throw new Error(`gemini_http_${response.status}`);
+  let response;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    response = await fetchImpl(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      signal,
+      body: JSON.stringify(body),
+    });
+    if (response.ok) break;
+    if (![429, 503].includes(response.status) || attempt > 0) {
+      throw new Error(`gemini_http_${response.status}`);
+    }
+    const retryAfter = Number(response.headers?.get?.('retry-after') || 0);
+    const delayMs = Math.max(500, Math.min((Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1500), 5000));
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  if (!response?.ok) throw new Error(`gemini_http_${response?.status || 'unknown'}`);
   const payload = await response.json();
   const text = clean(payload?.candidates?.[0]?.content?.parts?.map((p) => p?.text || '').join(' ') || '', 12000);
   if (!text) throw new Error('gemini_empty_response');
@@ -192,7 +207,7 @@ export async function routeChat({ messages, fetchImpl = fetch, env = process.env
     const controller = new AbortController();
     const timer = setTimeout(
       () => controller.abort(new Error('ai_provider_timeout')),
-      Math.max(1000, Math.min(Number(timeoutMs) || 60000, 180000)),
+      providerTimeoutMs(env, timeoutMs),
     );
     try {
       let result;
